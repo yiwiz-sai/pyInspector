@@ -3,5 +3,10 @@
 # author: SAI
 import os,sys,time
 
-if __name__=='__main__':
+def list_gdt():
     pass
+    
+if __name__=='__main__':
+    list_gdt()
+    pass
+

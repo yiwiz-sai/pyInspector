@@ -8,11 +8,8 @@ import pefile
 import pykd
 import windbgCmdHelper
 
-def checkSSDT():
-    r=windbgCmdHelper.dd('dd nt L1')
-    kernelbase=r[0]
-    print 'nt kernel baseaddr:0x%x' % kernelbase
-    
+def listSSDT():
+    kernelbase=windbgCmdHelper.g_kernelbase
     r=windbgCmdHelper.dd('dd nt!KeServiceDescriptorTable L4')
     KeServiceDescriptorTable=r[0]
     KiServiceTable=r[1][0]
@@ -26,16 +23,7 @@ def checkSSDT():
     table_rva=(KiServiceTable-kernelbase)
     print 'KiServiceTable rva:0x%x' % table_rva
     
-    nt = pykd.module( "nt" )
-
-    filepath=nt.image()
-    filepath="c:\\windows\\system32\\"+nt.image()
-    if not os.path.exists(filepath):
-        filepath="c:\\winnt\\system32\\"+nt.image()
-        if not filepath:
-            raise Exception('%s not exists!' % nt.image())
-
-    print 'kernel path:', filepath
+    filepath=windbgCmdHelper.g_kernelpath
     filedata=open(filepath, 'rb').read()
     pe = pefile.PE(data=filedata, fast_load=True)
     if pe.DOS_HEADER.e_magic!=0X5A4D or pe.NT_HEADERS.Signature!=0x4550:
@@ -47,7 +35,7 @@ def checkSSDT():
         itemsize=8
     else:
         itemsize=4
-    d=filedata[KiServiceTable_fileoffset:KiServiceTable_fileoffset+itemsize*serviceCount]
+    d=filedata[table_fileoffset:table_fileoffset+itemsize*serviceCount]
     hooklist=[]
     for i in xrange(serviceCount):
         source=binascii.b2a_hex(d[i*itemsize:(i+1)*itemsize][::-1])
@@ -67,5 +55,5 @@ def checkSSDT():
     
 
 if __name__ == "__main__":
-    checkSSDT()
+    listSSDT()
 

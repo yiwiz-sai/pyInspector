@@ -5,59 +5,7 @@ import os,sys,time
 import pykd
 import windbgCmdHelper
 
-class DriverInfo(object):
-    def __init__(self, name='', filepath='', driverobject=0,  baseaddr=0, modulesize=0, deviceobjectlist=[], dispatchfuncs=[], fastiofuncs=[]):
-        self.name=name.lower()
-        self.filepath=filepath.lower()
-        self.baseaddr='%x' % int(str(baseaddr), 16)
-        self.driverobject='%x' % int(str(driverobject), 16)
-        self.modulesize='%x' % int(str(modulesize), 16)
-        self.deviceobjectlist=map(lambda x:'%x' % int(str(x), 16), deviceobjectlist)
-        self.dispatchfuncs=map(lambda x:[x[0], '%x' % int(str(x[1]), 16)], dispatchfuncs)
-        self.fastiofuncs=map(lambda x:[x[0], '%x' % int(str(x[1]), 16)], fastiofuncs)
-        
-class DeviceInfo(object):
-    def __init__(self, driverobject=0, deviceobject=0,  upperdeviceobject=0, lowerdeviceobject=0):
-        self.driverobject='%x' % int(str(driverobject), 16)
-        self.deviceobject='%x' % int(str(deviceobject), 16)
-        self.upperdeviceobject='%x' % int(str(upperdeviceobject), 16)
-        self.lowerdeviceobject='%x' % int(str(lowerdeviceobject), 16)
-        
-def getDeviceInfo(deviceobject):
-    try:
-        DeviceObject=deviceobject
-        UpperDeviceObject=0
-        LowerDeviceObject=0
-        DriverObject=0
-        cmdline=r'!devobj %s' % str(deviceobject)
-        r=pykd.dbgCommand(cmdline)
-        r=r.splitlines()
-        type=''
-        for i in r:
-            i=i.strip()
-            if i.startswith('Device object'):
-                type='Device object'
-                continue
-            elif i.startswith('AttachedDevice (Upper) '):
-                d=i[len('AttachedDevice (Upper) '):]
-                UpperDeviceObject=d.split(' ')[0]
-                continue
-            elif i.startswith('AttachedTo (Lower) '):
-                d=i[len('AttachedTo (Lower) '):]
-                LowerDeviceObject=d.split(' ')[0]
-                continue
-            if type=='Device object':
-                a=i.split(' ')
-                DriverObject=a[-1]
-                type=''
-        
-        a=DeviceInfo(driverobject=DriverObject,  deviceobject=DeviceObject, upperdeviceobject=UpperDeviceObject, lowerdeviceobject=LowerDeviceObject)
-        return a
-    except Exception, err:
-        print err
-        return None
-
-def getDriverInfo(driverobject):
+def getDriverInfo(driverobject, fastinspect=False):
     info={'DriverObject':str(driverobject)}
     try:
         cmdline=r'dt _driver_object %s' % str(driverobject)
@@ -82,14 +30,11 @@ def getDriverInfo(driverobject):
                     DriverSection=data.split(' ')[0]
                     info['DriverSection']=DriverSection
                 elif name=='DriverName':
-                    pos=data.find('_UNICODE_STRING')
-                    if pos!=-1:
-                        info['DriverName']=data[pos+len('_UNICODE_STRING'):].strip()
+                    info['DriverName']=windbgCmdHelper.get_unicode_string(data)
                     break
         
-        global g_fastinspect
-        if g_fastinspect:
-            cmdline=r'dt _LDR_DATA_TABLE_ENTRY %s' % str(driverobject)
+        if not fastinspect:
+            cmdline=r'dt _LDR_DATA_TABLE_ENTRY %s' % str(DriverSection)
             r=pykd.dbgCommand(cmdline)
             r=r.splitlines()
             for i in r:
@@ -108,9 +53,7 @@ def getDriverInfo(driverobject):
                         SizeOfImage=data.split(' ')[0]
                         info['SizeOfImage']=SizeOfImage
                     elif name=='FullDllName':
-                        pos=data.find('_UNICODE_STRING')
-                        if pos!=-1:
-                            info['FullDllName']=data[pos+len('_UNICODE_STRING'):].strip()
+                        info['FullDllName']=windbgCmdHelper.get_unicode_string(data)
                         break
             
             cmdline=r'!drvobj %s 3' % str(driverobject)
@@ -165,10 +108,8 @@ def getDriverInfo(driverobject):
         print err
         return None
 
-g_fastinspect=True
-g_drivers={}
-def  ListDriversByDirectoryObject(dirname=r'\\'):
-    global g_drivers
+    
+def ListDriversByDirectoryObject(drivers, dirname=r'\\', fastinspect=False):
     cmdline=r'!object '+dirname
     print cmdline
     r=pykd.dbgCommand(cmdline)
@@ -195,46 +136,51 @@ def  ListDriversByDirectoryObject(dirname=r'\\'):
         if type=='Directory':
             #cmdline=r'!object '+obj
             childname=dirname+name+r'\\'
-            ListDriversByDirectoryObject(childname)
+            ListDriversByDirectoryObject(drivers, childname, fastinspect)
             
         elif type=='Device':
             deviceinfo=getDeviceInfo(obj)
             drvobj=deviceinfo.driverobject 
-            if drvobj in g_drivers:
+            if drvobj in drivers:
                 continue
-            g_drivers[drvobj]=[]
+            drivers[drvobj]=[]
             driverinfo=getDriverInfo(drvobj)
-            g_drivers[drvobj].append(driverinfo)
+            drivers[drvobj].append(driverinfo)
             
         elif type=='Driver':
-            driverinfo=getDriverInfo(obj)
+            driverinfo=getDriverInfo(obj, fastinspect)
             drvobj=driverinfo.driverobject 
-            if drvobj not in g_drivers:
-                g_drivers[drvobj]=[]
-            g_drivers[drvobj].append(driverinfo)
-
-def  ListDriversByZwQueryDriver():
+            if drvobj not in drivers:
+                drivers[drvobj]=[]
+            drivers[drvobj].append(driverinfo)
+    
+    return drivers
+    
+def  ListDriversByZwQueryDriver(drivers):
     return []
     
-def  ListDriversByDriverSection():
+def  ListDriversByDriverSection(drivers):
+    
     return []
 
-def ListDrivers(fastinspect=True):
-    global g_drivers, g_fastinspect
+def ListDrivers(fastinspect=False):
     start_time=time.time()
-    g_drivers={}
-    g_fastinspect=fastinspect
-    ListDriversByDirectoryObject()
-    print len(g_drivers)
+    drivers={}
+    ListDriversByDirectoryObject(drivers, fastinspect=fastinspect)
+    ListDriversByZwQueryDriver(drivers)
+    ListDriversByDriverSection(drivers)
+    
+    n=0
+    for l in drivers.values():
+        for i in l:
+            print '='*20
+            print i.name, i.filepath, i.baseaddr, i.driverobject, i.modulesize, i.deviceobjectlist
+            print i.dispatchfuncs
+            print i.fastiofuncs
+            n+=1
     print time.time()-start_time
-    return
-    driverlist=[]
-    driverlist+=ListDriversByZwQueryDriver()
-    driverlist+=ListDriversByDriverSection()
-    print len(driverlist)
+    print n
     
 if __name__=='__main__':
-    #extractDriverInfo('8631f918')
-    #extractDeviceInfo('85d967a0')
-    ListDrivers()
+    ListDrivers(False)
 

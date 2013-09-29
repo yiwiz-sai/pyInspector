@@ -8,7 +8,7 @@ import pykd
 import windbgCmdHelper
 
 
-def checkShadowSSDT():
+def listShadowSSDT():
     r=windbgCmdHelper.dd('dd win32k L1')
     win32kbase=r[0]
     print 'wink32.sys baseaddr:0x%x' % win32kbase
@@ -65,4 +65,4 @@ def checkShadowSSDT():
     return hooklist
 
 if __name__ == "__main__":
-    checkShadowSSDT()
+    listShadowSSDT()
