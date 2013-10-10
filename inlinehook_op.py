@@ -2,16 +2,40 @@
 # -*- coding: utf-8 -*
 # author: SAI
 import os,sys,time
+import traceback
 import pefile
 import pykd
-import windbgCmdHelper
-import binascii
-def checkInlineHook(modulepath=windbgCmdHelper.g_kernelpath, baseaddr=windbgCmdHelper.g_kernelbase, modulesize=windbgCmdHelper.g_kernelsize):
+from common import *
+
+def repairInlineHook(modulepath, startaddr, endaddr, eprocessaddr=None):
     try:
-        symbolpath=os.path.abspath(os.path.dirname(modulepath))
-        cmdline='.reload %s;.sympath %s' % (os.path.basename(modulepath), symbolpath)
+        symbolpath=g_sympath+';'+os.path.abspath(os.path.dirname(modulepath))
+        if eprocessaddr:
+            cmdline='.process /P %x;.sympath %s;' % (eprocessaddr, symbolpath)
+            r=pykd.dbgCommand(cmdline)
+        cmdline='.reload;'
         r=pykd.dbgCommand(cmdline)
-                
+        
+        if modulepath==g_kernelpath:
+            cmdline='!chkimg nt -r %x %x -v -d -f' % (startaddr, endaddr)
+        else:
+            cmdline='!chkimg %s -r %x %x -v -d -f' % (os.path.basename(modulepath), startaddr, endaddr)
+        
+        r=pykd.dbgCommand(cmdline)
+        for i in r:
+            print i
+    except Exception, err:
+        print traceback.format_exc()
+        
+def checkInlineHook(modulepath=g_kernelpath, baseaddr=g_kernelbase, eprocessaddr=None):
+    try:
+        print 'scan inlinehook in %s' % modulepath
+        symbolpath=g_sympath+';'+os.path.abspath(os.path.dirname(modulepath))
+        if eprocessaddr:
+            cmdline='.process /P %x;.sympath %s;' % (eprocessaddr, symbolpath)
+            r=pykd.dbgCommand(cmdline)
+        cmdline='.reload;'
+        r=pykd.dbgCommand(cmdline)
         filedata=open(modulepath, 'rb').read()
         pe = pefile.PE(data=filedata, fast_load=True)
         if pe.DOS_HEADER.e_magic!=0X5A4D or pe.NT_HEADERS.Signature!=0x4550:
@@ -30,9 +54,13 @@ def checkInlineHook(modulepath=windbgCmdHelper.g_kernelpath, baseaddr=windbgCmdH
                 fileoffsetend=fileoffsetstart+comparesize
                 memoffsetstart=baseaddr+ i.VirtualAddress
                 memoffsetend=memoffsetstart+comparesize
-                print '='*20
+                print '-'*20
                 print '%s :%x %x <--> %x %x  size:%d' % (i.Name, fileoffsetstart, fileoffsetend, memoffsetstart, memoffsetend, comparesize)
-                cmdline='!chkimg nt -r %x %x -v -d' % (memoffsetstart, memoffsetend)
+                if modulepath==g_kernelpath:
+                    cmdline='!chkimg nt -r %x %x -v -d' % (memoffsetstart, memoffsetend)
+                else:
+                    cmdline='!chkimg %s -r %x %x -v -d' % (os.path.basename(modulepath), memoffsetstart, memoffsetend)
+                
                 r=pykd.dbgCommand(cmdline)
                 if r.find('0 errors')!=-1:
                     print 'no hooks'
@@ -42,35 +70,12 @@ def checkInlineHook(modulepath=windbgCmdHelper.g_kernelpath, baseaddr=windbgCmdH
                         print i
                     
             except Exception, err:
-                print err
+                print traceback.format_exc()
      
     except Exception, err:
-        print err
+        print traceback.format_exc()
     
 if __name__=='__main__':
-    checkInlineHook()
+    checkInlineHook(modulepath=r'C:\tools\pyInspector\calc1234567890123456.exe', baseaddr=0x01000000, eprocess=0x85f4e760)
     pass
 
-
-'''    try:
-                memdata=''
-                cmdline='db %x %x' % (memoffsetstart, memoffsetend-1)
-                r=pykd.dbgCommand(cmdline)
-                r=r.splitlines()
-                for i in r:
-                    r=i.strip().split('  ')[1].split(' ')
-                    for j in r:
-                        for a in j.split('-'):
-                            memdata+=a
-
-                #memdata=binascii.a2b_hex(memdata)
-                rawdata=filedata[fileoffsetstart:fileoffsetend]
-                print binascii.b2a_hex(rawdata)[0:10]
-                print memdata[0:10]
-                #if memdata!=rawdata:
-                #    print 'fuck'
-                #else:
-                 #   print 'ok'
-                #print len(memdata), len(memdata2), len(rawdata)
-            except Exception, err:
-                print err'''

@@ -3,7 +3,7 @@
 # author: SAI
 import os,sys,time
 import pykd
-import windbgCmdHelper
+from common import *
 
 g_regkey_map=\
 {

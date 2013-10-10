@@ -6,41 +6,35 @@ import sys, os, time
 import binascii
 import pefile
 import pykd
-import windbgCmdHelper
+from common import *
 
 def listSSDT():
-    kernelbase=windbgCmdHelper.g_kernelbase
-    r=windbgCmdHelper.dd('dd nt!KeServiceDescriptorTable L4')
-    KeServiceDescriptorTable=r[0]
-    KiServiceTable=r[1][0]
-    serviceCount=r[1][2]
+    kernelbase=g_kernelbase
+    KeServiceDescriptorTable=pykd.getOffset('nt!KeServiceDescriptorTable')    
+    KiServiceTable=pykd.ptrPtr(KeServiceDescriptorTable)
+    serviceCount=pykd.ptrMWord(KeServiceDescriptorTable+2*g_mwordsize)
     print 'nt!KeServiceDescriptorTable:0x%x' % KeServiceDescriptorTable
     print 'nt!KiServiceTable:0x%x' % KiServiceTable
     print 'serviceCount:0x%x(%d)' % (serviceCount, serviceCount)
+    ssdttable=pykd.loadPtrs(KiServiceTable, serviceCount)
     
-    cmdline='dds %x L%x' % (KiServiceTable, serviceCount)
-    ssdttable=windbgCmdHelper.dds(cmdline)
     table_rva=(KiServiceTable-kernelbase)
     print 'KiServiceTable rva:0x%x' % table_rva
     
-    filepath=windbgCmdHelper.g_kernelpath
-    filedata=open(filepath, 'rb').read()
+    filedata=open(g_kernelpath, 'rb').read()
     pe = pefile.PE(data=filedata, fast_load=True)
     if pe.DOS_HEADER.e_magic!=0X5A4D or pe.NT_HEADERS.Signature!=0x4550:
         raise Exception("%s is not a pe file" % filepath)
 
     table_fileoffset=pe.get_offset_from_rva(table_rva)
     print 'KiServiceTable file offset:0x%x' % table_fileoffset
-    if pykd.is64bitSystem():
-        itemsize=8
-    else:
-        itemsize=4
-    d=filedata[table_fileoffset:table_fileoffset+itemsize*serviceCount]
+    d=filedata[table_fileoffset:table_fileoffset+g_mwordsize*serviceCount]
     hooklist=[]
     for i in xrange(serviceCount):
-        source=binascii.b2a_hex(d[i*itemsize:(i+1)*itemsize][::-1])
-        source=int(source, 16)-pe.OPTIONAL_HEADER.ImageBase+kernelbase
-        addr, current, symbolname=ssdttable[i]
+        source=binascii.b2a_hex(d[i*g_mwordsize:(i+1)*g_mwordsize][::-1])
+        source=pykd.addr64(int(source, 16))-pykd.addr64(pe.OPTIONAL_HEADER.ImageBase)+kernelbase
+        symbolname=pykd.findSymbol(source)
+        current=ssdttable[i]
         if source==current:
             print 'source:0x%x current:0x%x %s' % (source, current, symbolname)
         else:

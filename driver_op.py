@@ -3,184 +3,95 @@
 # author: SAI
 import os,sys,time
 import pykd
-import windbgCmdHelper
+from common import *
+from directory_op  import *
+class DriverInfo(object):
+    def __init__(self, name='', filepath='', driverobject=0, entrypoint=0,  baseaddr=0, modulesize=0):
+        self.name=name.lower()
+        self.filepath=filepath.lower()
+        self.baseaddr=baseaddr
+        self.driverobject=driverobject
+        self.modulesize=modulesize
+        self.entrypoint=entrypoint
 
-def getDriverInfo(driverobject, fastinspect=False):
-    info={'DriverObject':str(driverobject)}
+def add_driver2(driver_table, ldr):
     try:
-        cmdline=r'dt _driver_object %s' % str(driverobject)
-        r=pykd.dbgCommand(cmdline)
-        r=r.splitlines()
-        for i in r:
-            i=i.strip()
-            if i.startswith('+'):
-                i=i.split(':')
-                j=i[0].split(' ')
-                name=j[1]
-                data=i[1].strip()
-                if data.startswith('?'):
-                    continue
-                if name=='DriverStart':
-                    DriverStart=data.split(' ')[0]
-                    info['DriverStart']=DriverStart
-                elif name=='DriverSize':
-                    DriverSize=data.split(' ')[0]
-                    info['DriverSize']=DriverSize
-                elif name=='DriverSection':
-                    DriverSection=data.split(' ')[0]
-                    info['DriverSection']=DriverSection
-                elif name=='DriverName':
-                    info['DriverName']=windbgCmdHelper.get_unicode_string(data)
-                    break
+        ldr=int(ldr)
+        if ldr in driver_table:
+            return
         
-        if not fastinspect:
-            cmdline=r'dt _LDR_DATA_TABLE_ENTRY %s' % str(DriverSection)
-            r=pykd.dbgCommand(cmdline)
-            r=r.splitlines()
-            for i in r:
-                i=i.strip()
-                if i.startswith('+'):
-                    i=i.split(':')
-                    j=i[0].split(' ')
-                    name=j[1]
-                    data=i[1].strip()
-                    if data.startswith('?'):
-                        continue
-                    if name=='DllBase':
-                        DllBase=data.split(' ')[0]
-                        info['DllBase']=DllBase
-                    elif name=='SizeOfImage':
-                        SizeOfImage=data.split(' ')[0]
-                        info['SizeOfImage']=SizeOfImage
-                    elif name=='FullDllName':
-                        info['FullDllName']=windbgCmdHelper.get_unicode_string(data)
-                        break
-            
-            cmdline=r'!drvobj %s 3' % str(driverobject)
-            r=pykd.dbgCommand(cmdline)
-            r=r.splitlines()
-            type=''
-            for i in r:
-                i=i.strip()
-                if i.startswith('Device Object list'):
-                    type='Device Object list'
-                    continue
-                elif i.startswith('Dispatch routines'):
-                    type='Dispatch routines'
-                    continue
-                elif i.startswith('Fast I/O routines'):
-                    type='Fast I/O routines'
-                    continue
-    
-                if type=='Device Object list':
-                    a=i.split(' ')
-                    info['DeviceObjects']=filter(lambda x:x!='', a)
-                    type=''
-                elif type=='Dispatch routines' or type=='Fast I/O routines':
-                    if i=='':
-                        type=''
-                    else:
-                        a=i.split(' ')
-                        a=filter(lambda x:x!='', a)
-                        if type not in info:
-                            info[type]=[]
-                        if type=='Dispatch routines':
-                            funcaddr, symbolname=a[-1].split('\t')
-                            info[type].append([a[1], funcaddr, symbolname])
-                        else:
-                            info[type].append([a[0], funcaddr, symbolname])
-        
-        name=info.get('DriverName','')
-        filepath=info.get('FullDllName', '')
-        driverobject=info.get('DriverObject', 0)
-        baseaddr=info.get('DriverStart', 0)
-        if baseaddr=='(null)':
-            baseaddr=0
-        modulesize=info.get('SizeOfImage', 0)
-        if modulesize=='(null)':
-            modulesize=0
-        deviceobjectlist=info.get('DeviceObjects', [])
-        dispatchfuncs=info.get('Dispatch routines', [])
-        fastiofuncs=info.get('Fast I/O routines', [])
-        a=DriverInfo(name=name, filepath=filepath, driverobject=driverobject, baseaddr=baseaddr, modulesize=modulesize, deviceobjectlist=deviceobjectlist, dispatchfuncs=dispatchfuncs, fastiofuncs=fastiofuncs)
-        return a
+        DriverSection=pykd.typedVar('nt!_LDR_DATA_TABLE_ENTRY', ldr)
+        filepath=pykd.loadUnicodeString(DriverSection.FullDllName)
+        name=pykd.loadUnicodeString(DriverSection.BaseDllName)
+        baseaddr=int(DriverSection.DllBase)
+        modulesize=int(DriverSection.SizeOfImage)
+        entrypoint=int(DriverSection.EntryPoint)
+        print ldr, name
+        driver_table[ldr]=DriverInfo(name=name, filepath=filepath,  entrypoint=entrypoint, baseaddr=baseaddr, modulesize=modulesize)
     except Exception, err:
-        print err
-        return None
-
+        print traceback.format_exc()          
     
-def ListDriversByDirectoryObject(drivers, dirname=r'\\', fastinspect=False):
-    cmdline=r'!object '+dirname
-    print cmdline
-    r=pykd.dbgCommand(cmdline)
-    r=r.splitlines()
-    startlist=0
-    for i in r:
-        i=i.lstrip()
-        if i.startswith('--'):
-            startlist=1
-            continue
+def add_driver(driver_table, driverobjectaddr):
+    try:
+        driverobject=pykd.typedVar('nt!_DRIVER_OBJECT', driverobjectaddr) 
+        ldr=int(driverobject.DriverSection)
+        if ldr==0:
+            filepath=pykd.loadUnicodeString(driverobject.DriverName)
+            name=os.path.basename(filepath)
+            baseaddr=int(driverobject.DriverStart)
+            modulesize=int(driverobject.DriverSize)
+            driver_table[int(driverobject)]=DriverInfo(name=name, filepath=filepath, driverobject=driverobjectaddr, baseaddr=baseaddr, modulesize=modulesize)
+            return
             
-        if not startlist:
-            continue
-        data=i.split()
-        if len(data)>3:
-            obj=data[1]
-            type=data[2]
-            name=data[3]
-        else:
-            obj=data[0]
-            type=data[1]
-            name=data[2]
+        if ldr in driver_table:
+            return
         
-        if type=='Directory':
-            #cmdline=r'!object '+obj
-            childname=dirname+name+r'\\'
-            ListDriversByDirectoryObject(drivers, childname, fastinspect)
+        DriverSection=pykd.typedVar('nt!_LDR_DATA_TABLE_ENTRY', ldr)
+        filepath=pykd.loadUnicodeString(DriverSection.FullDllName)
+        name=pykd.loadUnicodeString(DriverSection.BaseDllName)
+        baseaddr=int(DriverSection.DllBase)
+        modulesize=int(DriverSection.SizeOfImage)
+        entrypoint=int(DriverSection.EntryPoint)
+        driver_table[ldr]=DriverInfo(name=name, filepath=filepath, driverobject=driverobjectaddr,  entrypoint=entrypoint, baseaddr=baseaddr, modulesize=modulesize)
+    except Exception, err:
+        print traceback.format_exc()          
             
-        elif type=='Device':
-            deviceinfo=getDeviceInfo(obj)
-            drvobj=deviceinfo.driverobject 
-            if drvobj in drivers:
-                continue
-            drivers[drvobj]=[]
-            driverinfo=getDriverInfo(drvobj)
-            drivers[drvobj].append(driverinfo)
-            
-        elif type=='Driver':
-            driverinfo=getDriverInfo(obj, fastinspect)
-            drvobj=driverinfo.driverobject 
-            if drvobj not in drivers:
-                drivers[drvobj]=[]
-            drivers[drvobj].append(driverinfo)
-    
-    return drivers
-    
-def  ListDriversByZwQueryDriver(drivers):
-    return []
-    
-def  ListDriversByDriverSection(drivers):
-    
-    return []
+def listDriversByDirectoryObject(driver_table):
+    try:
+        def list_callback(obj, type, driver_table):
+            if type=='Driver':
+                driverobjectaddr=int(obj, 16)
+                add_driver(driver_table, driverobjectaddr)
+            return True
+        crawl_object_by_directory(list_callback, driver_table)
+        return
+    except Exception, err:
+        print traceback.format_exc()          
 
-def ListDrivers(fastinspect=False):
-    start_time=time.time()
-    drivers={}
-    ListDriversByDirectoryObject(drivers, fastinspect=fastinspect)
-    ListDriversByZwQueryDriver(drivers)
-    ListDriversByDriverSection(drivers)
-    
-    n=0
-    for l in drivers.values():
+def listDriversByPsLoadedModuleList(driver_table):
+    try:
+        PsLoadedModuleList=pykd.getOffset('nt!PsLoadedModuleList')
+        l=pykd.typedVarList(PsLoadedModuleList, 'nt!_LDR_DATA_TABLE_ENTRY', 'InLoadOrderLinks')
         for i in l:
-            print '='*20
-            print i.name, i.filepath, i.baseaddr, i.driverobject, i.modulesize, i.deviceobjectlist
-            print i.dispatchfuncs
-            print i.fastiofuncs
-            n+=1
-    print time.time()-start_time
-    print n
-    
-if __name__=='__main__':
-    ListDrivers(False)
+            add_driver2(driver_table, i)
 
+    except Exception, err:
+        print traceback.format_exc()     
+        
+def ListDrivers():
+    driver_table={}
+    listDriversByDirectoryObject(driver_table)
+    listDriversByPsLoadedModuleList(driver_table)
+    return driver_table.values()
+
+def getDevices(driverobjectaddr):
+    pass
+
+if __name__=='__main__':
+    starttime=time.time()
+    l=ListDrivers()
+    print 'driverobject baseaddr size entrypoint name filepath'
+    print '='*30
+    for i in l:
+        print '%x %x %x %x %s %s' % (i.driverobject, i.baseaddr, i.modulesize,i.entrypoint, i.name, i.filepath)
+    print 'number:', len(l), 'cost time:', time.time()-starttime

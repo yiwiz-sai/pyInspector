@@ -2,10 +2,11 @@
 # -*- coding: utf-8 -*
 # author: SAI
 import os,sys,time
+import traceback
 import pykd
-import windbgCmdHelper
+from common import *
 
-def crawl_object_by_directory(dirname, callback, param):
+def crawl_object_by_directory(callback, param, dirname='\\'):
     cmdline='!object '+dirname
     print cmdline
     r=pykd.dbgCommand(cmdline)
@@ -34,7 +35,7 @@ def crawl_object_by_directory(dirname, callback, param):
             
         if type=='Directory':
             childname=dirname+name+'\\'
-            if not crawl_object_by_directory(childname, callback, param):
+            if not crawl_object_by_directory(callback, param, childname):
                 return False
                 
     return True

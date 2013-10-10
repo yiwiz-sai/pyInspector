@@ -5,24 +5,20 @@ import os,sys,time
 import binascii
 import pefile
 import pykd
-import windbgCmdHelper
-
-
+from common import *
 def listShadowSSDT():
-    r=windbgCmdHelper.dd('dd win32k L1')
-    win32kbase=r[0]
+
+    r=pykd.dbgCommand('dd win32k L1').split(' ')
+    win32kbase=pykd.addr64(int(r[0],16))
     print 'wink32.sys baseaddr:0x%x' % win32kbase
     
-    r=windbgCmdHelper.dd('dd win32k!W32pServiceTable L1')
-    W32pServiceTable=r[0]
+    W32pServiceTable=pykd.getOffset('win32k!W32pServiceTable')
     print 'win32k!W32pServiceTable:0x%x' % W32pServiceTable
-    
-    r=windbgCmdHelper.dd('dd win32k!W32pServiceLimit L1')
-    W32pServiceLimit=r[1][0]
+        
+    W32pServiceLimit=pykd.getOffset('win32k!W32pServiceLimit')
+    W32pServiceLimit=pykd.ptrMWord(W32pServiceLimit)
     print 'win32k!W32pServiceLimit:0x%x(%d)' % (W32pServiceLimit, W32pServiceLimit)
-    
-    cmdline='dds %x L%x' % (W32pServiceTable, W32pServiceLimit)
-    ssdttable=windbgCmdHelper.dds(cmdline)
+    shadowssdttable=pykd.loadPtrs(W32pServiceTable, W32pServiceLimit)
     
     table_rva=(W32pServiceTable-win32kbase)
     print 'W32pServiceTable rva:0x%x' % table_rva
@@ -42,16 +38,13 @@ def listShadowSSDT():
 
     table_fileoffset=pe.get_offset_from_rva(table_rva)
     print 'W32pServiceTable file offset:0x%x' % table_fileoffset
-    if pykd.is64bitSystem():
-        itemsize=8
-    else:
-        itemsize=4
-    d=filedata[table_fileoffset:table_fileoffset+itemsize*W32pServiceLimit]
+    d=filedata[table_fileoffset:table_fileoffset+g_mwordsize*W32pServiceLimit]
     hooklist=[]
     for i in xrange(W32pServiceLimit):
-        source=binascii.b2a_hex(d[i*itemsize:(i+1)*itemsize][::-1])
+        source=binascii.b2a_hex(d[i*g_mwordsize:(i+1)*g_mwordsize][::-1])
         source=int(source, 16)-pe.OPTIONAL_HEADER.ImageBase+win32kbase
-        addr, current, symbolname=ssdttable[i]
+        symbolname=pykd.findSymbol(source)
+        current=shadowssdttable[i]
         if source==current:
             print 'source:0x%x current:0x%x %s' % (source, current, symbolname)
         else:

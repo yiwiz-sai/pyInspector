@@ -2,97 +2,141 @@
 # -*- coding: utf-8 -*
 # author: SAI
 import os,sys,time
+import traceback
 import pykd
-import windbgCmdHelper
-from struct_info import *
+from common import *
 
-def listProcessByListEntry(eprocess_table,  cmdline):
+class ProcessInfo(object):
+    def __init__(self, eprocess=None):
+        super(ProcessInfo, self).__init__()
+        self.eprocess=int(eprocess)
+        self.pid=int(eprocess.UniqueProcessId)
+        self.parentpid=int(eprocess.InheritedFromUniqueProcessId)
+        self.name=pykd.loadChars(eprocess.ImageFileName,16)
+        self.peb=int(eprocess.Peb)
+        self.fullpath=pykd.loadUnicodeString(eprocess.SeAuditProcessCreationInfo.ImageFileName.Name)
+        
+mmhighestuseraddress=pykd.getOffset('nt!MmHighestUserAddress')
+def add_process(eprocess_table, eprocessobj):
     try:
-        r=pykd.dbgCommand(cmdline)
-        r=r.splitlines()
-        p=None
-        for i in r:
-            i=i.strip()
-            if i=='':
-                continue
-            if i.startswith('+'):
-                if p:
-                    name, data=i.split(':')
-                    data=data.strip()
-                    name=name.strip().split(' ')[-1]
-                    if name=='UniqueProcessId':
-                        p.pid=int(data.split(' ')[0], 16)
-                    elif name=='InheritedFromUniqueProcessId':
-                        if data=='(null)':
-                            p.parentpid=0
-                        else:
-                            p.parentpid=int(data.split(' ')[0], 16)
-                    elif name=='ImageFileName':
-                        pos=data.find('"')
-                        if pos!=-1:
-                            p.name=data[pos:].strip('"')
-            else:
-                eprocess=i.split(' ')[0]
-                if eprocess not in eprocess_table:
-                    p=eprocess_table[eprocess]=ProcessInfo(eprocess=int(eprocess, 16))
-                else:
-                    p=eprocess_table[eprocess]
-                    
+        eprocessaddr=int(eprocessobj)
+        if eprocessaddr in eprocess_table:
+            return
+        if eprocessobj.ObjectTable<mmhighestuseraddress or eprocessobj.VadRoot<mmhighestuseraddress or eprocessobj.QuotaBlock<mmhighestuseraddress:
+            #print 'invalid process:', hex(eprocessobj), 'pid:', int(eprocessobj.UniqueProcessId)
+            eprocess_table[eprocessaddr]=None
+        else:
+            #print hex(eprocessobj)
+            eprocess_table[eprocessaddr]=ProcessInfo(eprocessobj)
     except Exception, err:
-        print err
-
-
-def listProcessByPsActiveProcessHead(eprocess_table={}):
-    cmdline='''!list \"-t nt!_LIST_ENTRY.Flink -x \\"r $t1=@@(#CONTAINING_RECORD(@$extret, nt!_EPROCESS, ActiveProcessLinks));da $t1;dt nt!_EPROCESS UniqueProcessId InheritedFromUniqueProcessId Vm.VmWorkingSetList SessionProcessLinks ImageFileName Pcb.ReadyListHead Pcb.ThreadListHead @$t1\\" poi(nt!PsActiveProcessHead)\" '''
-    list_process_by_list_entry(eprocess_table, cmdline)
+        pass
+        
+def add_process2(eprocess_table, eprocessaddr):
+    try:
+        eprocessaddr=pykd.addr64(eprocessaddr)
+        if eprocessaddr in eprocess_table:
+            return
+    
+        eprocessobj=pykd.typedVar('nt!_EPROCESS', eprocessaddr) 
+        if eprocessobj.ObjectTable<mmhighestuseraddress or eprocessobj.VadRoot<mmhighestuseraddress or eprocessobj.QuotaBlock<mmhighestuseraddress:
+            #print 'invalid process:', hex(eprocessobj), 'pid:', int(eprocessobj.UniqueProcessId)
+            eprocess_table[eprocessaddr]=None
+        else:
+            #print hex(eprocessobj)
+            eprocess_table[eprocessaddr]=ProcessInfo(eprocessobj)    
+    except Exception, err:
+        pass
 
 def listProcessByPspcidTable(eprocess_table={}):
     try:
         cmdline='!process 0 0'
         r=pykd.dbgCommand(cmdline)
         r=r.splitlines()
-        p=None
         for i in r:
-            i=i.strip()
-            if i.startswith('PROCESS'):
-                members=i.strip().split('  ')
-                eprocess=members[0].split(' ')[1]
-                if eprocess not in eprocess_table:
-                    p=eprocess_table[eprocess]=ProcessInfo(eprocess=int(eprocess, 16))
-                else:
-                    p=eprocess_table[eprocess]
-                
-                for j in members[1:]:
-                    j=j.split(':')
-                    if j==[]:
-                        continue
-                    name=j[0].strip()
-                    if name=='Cid':
-                        data=j[1].strip()
-                        p.pid=int(data, 16)
-                    elif name=='ParentCid':
-                        data=j[1].strip()
-                        p.parentpid=int(data, 16)
-                    elif name=='Peb':
-                        data=j[1].strip()
-                        p.peb=int(data, 16)
-                        
-            elif i.startswith('DirBase'):
-                continue
-            
-            elif i.startswith('Image'):
-                p.name=i.split(':')[1].strip()
-        
+            if i.startswith('PROCESS '):
+                startpos=len('PROCESS ')
+                endpos=i.find(' ', startpos)
+                eprocessaddr=int(i[startpos:endpos], 16)
+                add_process2(eprocess_table, eprocessaddr)
     except Exception, err:
-        print err
-    
-def listProcess():
-    eprocess_table={}
-    listProcessByPspcidTable(eprocess_table)
-    print 'eprocess pid ppid peb name fullpath'
-    for i in eprocess_table.values():
-        print '%x %5d %5d %x %s %s' % (i.eprocess, i.pid, i.parentpid, i.peb, i.name, i.fullpath)
+        print traceback.format_exc()
+
+def listProcessBySessionProcessLinks(eprocess_table={}):
+    try:
+        if not eprocess_table:
+            listProcessByPsActiveProcessHead(eprocess_table)
         
+        SessionProcessLinks_table=[]
+        for eprocessaddr in eprocess_table.keys():
+            if eprocessaddr and eprocess_table[eprocessaddr]:
+                #print hex(eprocessaddr)
+                eprocessobj=pykd.typedVar('nt!_EPROCESS', eprocessaddr) 
+                SessionProcessLinks=eprocessobj.SessionProcessLinks
+                SessionProcessLinks=int(SessionProcessLinks)
+                if SessionProcessLinks and SessionProcessLinks not in SessionProcessLinks_table:
+                    SessionProcessLinks_table.append(SessionProcessLinks)
+                    processList=pykd.typedVarList(SessionProcessLinks, 'nt!_EPROCESS', 'SessionProcessLinks')
+                    for i in processList:
+                        add_process(eprocess_table, i)
+        return
+    except Exception, err:
+        print traceback.format_exc()
+        
+def listProcessByWorkingSetExpansionLinks(eprocess_table={}):
+    try:
+        if not eprocess_table:
+            listProcessByPsActiveProcessHead(eprocess_table)
+        
+        WorkingSetExpansionLinks_list=[]
+        for eprocessaddr in eprocess_table.keys():
+            if eprocessaddr and eprocess_table[eprocessaddr]:
+                #print hex(eprocessaddr)
+                eprocessobj=pykd.typedVar('nt!_EPROCESS', eprocessaddr) 
+                WorkingSetExpansionLinks=eprocessobj.Vm.WorkingSetExpansionLinks
+                WorkingSetExpansionLinks=int(WorkingSetExpansionLinks)
+                if WorkingSetExpansionLinks and WorkingSetExpansionLinks not in WorkingSetExpansionLinks_list:
+                    WorkingSetExpansionLinks_list.append(WorkingSetExpansionLinks)
+                    processList=pykd.typedVarList(WorkingSetExpansionLinks, 'nt!_EPROCESS', 'Vm.WorkingSetExpansionLinks')
+                    for i in processList:
+                        add_process(eprocess_table, i)
+        return 
+    except Exception, err:
+        print traceback.format_exc()
+
+def listProcessByPsActiveProcessHead(eprocess_table={}):
+    try:
+        PsActiveProcessHead=pykd.getOffset('nt!PsActiveProcessHead')
+        processList=pykd.typedVarList(PsActiveProcessHead, 'nt!_EPROCESS', 'ActiveProcessLinks')
+        for i in processList:
+            add_process(eprocess_table, i)
+    except Exception, err:
+        print traceback.format_exc()
+          
+def listProcess():
+    
+    eprocess_table={}
+    print 'listProcessByPsActiveProcessHead'
+    listProcessByPsActiveProcessHead(eprocess_table)
+    print 'listProcessBySessionProcessLinks'
+    listProcessBySessionProcessLinks(eprocess_table)
+    print 'listProcessByWorkingSetExpansionLinks'
+    listProcessByWorkingSetExpansionLinks(eprocess_table)
+    print 'listProcessByPspcidTable'
+    listProcessByPspcidTable(eprocess_table)
+
+    l=filter(lambda x:x!=None, eprocess_table.values())
+    l.sort(key=lambda x:x.pid)
+    return l
+    
 if __name__=='__main__':
-    listProcess()
+    starttime=time.time()
+    l=listProcess()
+    print 'eprocess pid ppid peb name fullpath'
+    number=0
+    print '='*30
+    for i in l:
+        print '%x %5d %5d %x %s %s' % (i.eprocess, i.pid, i.parentpid, i.peb, i.name, i.fullpath)
+        number+=1
+    print 'valid number:', number, 'cost time:', time.time()-starttime
+    
     pass
