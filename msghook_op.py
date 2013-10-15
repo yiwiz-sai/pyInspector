@@ -36,7 +36,7 @@ class MsgInfo(object):
         self.bGlobal=bGlobal
         self.processpath=processpath
 
-def listMsgHook():
+def inspectMsgHook():
     msglist=[]
     try:
         gSharedInfo=pykd.getOffset('win32k!gSharedInfo')
@@ -83,16 +83,18 @@ def listMsgHook():
     except Exception, err:
         print traceback.format_exc()
     
-    return msglist
-    
-if __name__=='__main__':
     n1=n2=0
-    r=listMsgHook()
     print 'pid tid handle funcoffset msg bGlobal processpath'
-    for i in r:
+    for i in msglist:
         print '%d %d 0x%x 0x%x %s %d %s' % (i.pid, i.tid, i.handle, i.funcoffset, i.msg, i.bGlobal, i.processpath)
         if i.bGlobal:
             n2+=1
         else:
             n1+=1
     print 'local hook number:%d, global hook number:%d' % (n1, n2)
+    return 
+    
+if __name__=='__main__':
+    inspectMsgHook()
+    pass
+   

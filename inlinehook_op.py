@@ -27,12 +27,18 @@ def repairInlineHook(modulepath, startaddr, endaddr, eprocessaddr=None):
     except Exception, err:
         print traceback.format_exc()
         
-def checkInlineHook(modulepath=g_kernelpath, baseaddr=g_kernelbase, eprocessaddr=None):
+def inspectInlineHook(modulepath=g_kernelpath, baseaddr=g_kernelbase, eprocessaddr=None):
     try:
-        print 'scan inlinehook in %s' % modulepath
-        symbolpath=g_sympath+';'+os.path.abspath(os.path.dirname(modulepath))
+        print '='*10, 'scan inlinehook in %s' % modulepath, '='*10
+        windowsdir=win32api.GetWindowsDirectory()
+        system32dir=os.path.join(windowsdir, 'system32')
+        driversdir=os.path.join(windowsdir, 'system32', 'drivers')
+        symbolpath='%s;%s;%s;%s;' % (g_sympath, system32dir, driversdir,os.path.abspath(os.path.dirname(modulepath)))
         if eprocessaddr:
-            cmdline='.process /P %x;.sympath %s;' % (eprocessaddr, symbolpath)
+            cmdline='.process /P %x;.sympath %s' % (eprocessaddr, symbolpath)
+            r=pykd.dbgCommand(cmdline)
+        else:
+            cmdline='.sympath %s' % symbolpath
             r=pykd.dbgCommand(cmdline)
         cmdline='.reload;'
         r=pykd.dbgCommand(cmdline)
@@ -54,28 +60,74 @@ def checkInlineHook(modulepath=g_kernelpath, baseaddr=g_kernelbase, eprocessaddr
                 fileoffsetend=fileoffsetstart+comparesize
                 memoffsetstart=baseaddr+ i.VirtualAddress
                 memoffsetend=memoffsetstart+comparesize
-                print '-'*20
+                print '-'*10
                 print '%s :%x %x <--> %x %x  size:%d' % (i.Name, fileoffsetstart, fileoffsetend, memoffsetstart, memoffsetend, comparesize)
-                if modulepath==g_kernelpath:
+                if modulepath.lower()==g_kernelpath.lower():
                     cmdline='!chkimg nt -r %x %x -v -d' % (memoffsetstart, memoffsetend)
                 else:
-                    cmdline='!chkimg %s -r %x %x -v -d' % (os.path.basename(modulepath), memoffsetstart, memoffsetend)
-                
+                    name=os.path.splitext(os.path.basename(modulepath))[0]
+                    cmdline='!chkimg %s -r %x %x -v -d' % (name, memoffsetstart, memoffsetend)
+                #print cmdline
                 r=pykd.dbgCommand(cmdline)
-                if r.find('0 errors')!=-1:
-                    print 'no hooks'
-                else:
+                if r.find('[')!=-1:
+                    print '!!!!hooklist'
                     r=r.splitlines()
                     for i in r:
                         print i
+                else:
+                    print 'no hooks'
                     
             except Exception, err:
                 print traceback.format_exc()
      
     except Exception, err:
         print traceback.format_exc()
+
+from driver_op import *
+def inspectAllRing0InlineHook():
+    driverlist=listDriverByPsLoadedModuleList()
+    for i in driverlist:
+        if os.path.exists(i.filepath) and i.baseaddr:
+            inspectInlineHook(i.filepath, i.baseaddr)
+            print
     
+from dll_op import *
+def inspectAllRing3InlineHook():
+    processlist=listProcessByPsActiveProcessHead()
+    for eprocessinfo in processlist:
+        print '='*10, 'process:%x pid:%d %s' % (eprocessinfo.eprocessaddr, eprocessinfo.pid, eprocessinfo.filepath), '='*10
+        modulelist=listModuleByVadRoot(eprocessinfo.eprocessaddr)
+        if not modulelist:
+            print 'the process has no modules(vadroot is null)'
+        for i in modulelist:
+            if os.path.exists(i.filepath) and i.startaddr:
+                inspectInlineHook(i.filepath, i.startaddr, eprocessinfo.eprocessaddr)
+                print
+
+def inspectProcessInlineHook(eprocessaddr):
+    modulelist=listModuleByVadRoot(eprocessaddr)
+    if not modulelist:
+        print 'the process has no modules(vadroot is null)'
+    for i in modulelist:
+        if os.path.exists(i.filepath) and i.startaddr:
+            inspectInlineHook(i.filepath, i.startaddr, eprocessinfo.eprocessaddr)
+            print
+
+def inspectDriverInlineHook(driverobjectaddr):
+    info=DriverInfo()
+    if info.init1(driverobjectaddr):
+        inspectInlineHook(info.filepath, info.baseaddr)
+
 if __name__=='__main__':
-    checkInlineHook(modulepath=r'C:\tools\pyInspector\calc1234567890123456.exe', baseaddr=0x01000000, eprocess=0x85f4e760)
+    if sys.argv[1]=='allring0':
+        inspectAllRing0InlineHook()
+    elif sys.argv[1]=='allring3':
+        inspectAllRing3InlineHook()
+    elif sys.argv[1]=='ring0':
+        driverobjectaddr=int(sys.argv[2], 16)
+        inspectDriverInlineHook(driverobjectaddr)
+    elif sys.argv[1]=='ring3':
+        eprocessaddr=int(sys.argv[2], 16)
+        inspectProcessInlineHook(eprocessaddr)
     pass
 

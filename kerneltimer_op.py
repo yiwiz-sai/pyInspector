@@ -2,15 +2,20 @@
 # -*- coding: utf-8 -*
 # author: SAI
 import os,sys,time
+import traceback
 import pykd
-import windbgCmdHelper
-def listKernelTimer():
-    l=[]
+from common import *
+mmhighestuseraddress=pykd.ptrPtr(pykd.getOffset('nt!MmHighestUserAddress'))
+
+def inspectKernelTimer():
     try:
+        cmdline='.reload;'
+        r=pykd.dbgCommand(cmdline)
         cmdline=r'!timer'
         r=pykd.dbgCommand(cmdline)
         r=r.splitlines()
         start=0
+        idx=0
         for i in r:   
             i=i.strip() 
             if i.startswith('List Timer'):
@@ -20,18 +25,23 @@ def listKernelTimer():
             if start!=1:
                 continue
             
-            if i.find(']')!=-1:
-                data=i.split(']')[1][1:]
-                data=data.strip()
-                print data
-                l.append(data)
-        
-        return l
+            data=i.strip()
+            pos=data.find('(DPC @ ')
+            if pos!=-1:
+                endpos=data.find(')', pos)
+                data=data[pos+len('(DPC @ '):endpos]
+                dpc=pykd.addr64(int(data, 16))
+                if dpc<=int(mmhighestuseraddress):
+                    print i, '!!!!!!!!'
+                else:
+                    dpcobj=pykd.typedVar('nt!_KDPC', dpc)
+                    symbolname=pykd.findSymbol(dpcobj.DeferredRoutine)
+                    print '%d dpc:%x timerfunc:%x %s' % (idx, int(dpc), int(dpcobj.DeferredRoutine), symbolname)
+                idx+=1
     except Exception, err:
-        print err
-        return []
-        
+        print traceback.format_exc()     
+    
 if __name__=='__main__':
-    listKernelTimer()
+    inspectKernelTimer()
     pass
 

@@ -8,7 +8,7 @@ import pefile
 import pykd
 from common import *
 
-def listSSDT():
+def inspectSSDT():
     kernelbase=g_kernelbase
     KeServiceDescriptorTable=pykd.getOffset('nt!KeServiceDescriptorTable')    
     KiServiceTable=pykd.ptrPtr(KeServiceDescriptorTable)
@@ -45,9 +45,8 @@ def listSSDT():
         print i
         
     print 'hooked function number:', len(hooklist)
-    return hooklist
-    
 
 if __name__ == "__main__":
-    listSSDT()
+    inspectSSDT()
+
 

@@ -8,7 +8,7 @@ from common import *
 
 def crawl_object_by_directory(callback, param, dirname='\\'):
     cmdline='!object '+dirname
-    print cmdline
+    #print cmdline
     r=pykd.dbgCommand(cmdline)
     r=r.splitlines()
     startlist=0

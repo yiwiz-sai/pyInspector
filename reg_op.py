@@ -9,6 +9,7 @@ g_regkey_map=\
 {
     
 }
+
 def listReg(regpath='System\CurrentControlSet\Services\Tcpip!*'):
     try:
         cmdline='!dreg %s' % regpath

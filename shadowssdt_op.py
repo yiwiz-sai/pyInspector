@@ -6,8 +6,7 @@ import binascii
 import pefile
 import pykd
 from common import *
-def listShadowSSDT():
-
+def inspectShadowSSDT():
     r=pykd.dbgCommand('dd win32k L1').split(' ')
     win32kbase=pykd.addr64(int(r[0],16))
     print 'wink32.sys baseaddr:0x%x' % win32kbase
@@ -58,4 +57,4 @@ def listShadowSSDT():
     return hooklist
 
 if __name__ == "__main__":
-    listShadowSSDT()
+    inspectShadowSSDT()

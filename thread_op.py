@@ -7,61 +7,62 @@ import pykd
 from common import *
 
 class ThreadInfo(object):
-    def __init__(self, ethread=None):
+    def __init__(self, ethreadobj=None):
         super(ThreadInfo, self).__init__()
-        self.ethread=int(ethread)
-        self.tid=int(ethread.Cid.UniqueThread)
-        self.startaddr=int(ethread.StartAddress)
+        self.ethreadaddr=int(ethreadobj)
+        self.tid=int(ethreadobj.Cid.UniqueThread)
+        self.startaddr=int(ethreadobj.StartAddress)
         
-mmhighestuseraddress=pykd.getOffset('nt!MmHighestUserAddress')
-def add_thread(ethread_table, ethreadobj):
+def inspectHiddenThread(eprocessinfo):
+    threadlist={}
+    hiddenthreadlist=[]
     try:
-        ethreadaddr=int(ethreadobj)
-        if ethreadaddr in ethread_table:
-            return
-        if ethreadaddr<mmhighestuseraddress:
-            #print 'invalid process:', hex(eprocessobj), 'pid:', int(eprocessobj.UniqueProcessId)
-            ethread_table[ethreadaddr]=None
-        else:
-            #print hex(eprocessobj)
-            ethread_table[ethreadaddr]=ThreadInfo(ethreadobj)
-            
-    except Exception, err:
-        print traceback.format_exc()
-        
-def listThread(eprocessaddr=None):
-    ethread_table={}
-    try:
-        if not eprocessaddr:
-            PsActiveProcessHead=pykd.getOffset('nt!PsActiveProcessHead')
-            entry=pykd.ptrPtr(PsActiveProcessHead)
-            eprocessobj=pykd.containingRecord(entry, 'nt!_EPROCESS', 'ActiveProcessLinks')
-            eprocessaddr=int(eprocessobj)
-        else:
-            eprocessobj=pykd.typedVar('nt!_EPROCESS', eprocessaddr) 
-            
+        eprocessaddr=eprocessinfo.eprocessaddr
+        cmdline='.process /P %x;.reload;' % eprocessaddr
+        r=pykd.dbgCommand(cmdline)
+        eprocessobj=pykd.typedVar('nt!_EPROCESS', eprocessaddr) 
         threadList=pykd.typedVarList(eprocessobj.ThreadListHead, 'nt!_ETHREAD', 'ThreadListEntry')
         for i in threadList:
-            add_thread(ethread_table, i)
-        
+            if int(i) not in threadlist:
+                info=ThreadInfo(i)
+                symbolname=pykd.findSymbol(info.startaddr)
+                if symbolname.find('!')==-1:
+                    hiddenthreadlist.append(info)
+
+                threadlist[int(i)]=1
+
         threadList=pykd.typedVarList(eprocessobj.Pcb.ThreadListHead, 'nt!_ETHREAD', 'Tcb.ThreadListEntry')
         for i in threadList:
-            add_thread(ethread_table, i)
-
+            if int(i) not in threadlist:
+                threadlist[int(i)]=ThreadInfo(i)
+        
+        if hiddenthreadlist:
+            print '!'*10, 'process:%x pid:%d %s' % (eprocessaddr, eprocessinfo.pid, eprocessinfo.fullpath), '!'*10
+            for i in hiddenthreadlist:
+                print 'ethread:%x tid:%d entry:%x' % (i.ethreadaddr, i.tid, i.startaddr)
+        else:
+            print '='*10, 'process:%x pid:%d %s has no hidden thread' % (eprocessaddr, eprocessinfo.pid, eprocessinfo.fullpath), '='*10
     except Exception, err:
         print traceback.format_exc()
 
-    l=filter(lambda x:x!=None, ethread_table.values())
-    l.sort(key=lambda x:x.tid)
-    return l
+    
+from process_op import *
+def inspectAllProcessHiddenThread():
+    processlist=listProcessByPsActiveProcessHead()
+    for i in processlist:
+        inspectHiddenThread(i)
+    print 
+    print 'inspect completely'
     
 if __name__=='__main__':
-    starttime=time.time()
-    l=listThread()
-    print 'ethread tid startaddr'
-    print '='*30
-    for i in l:
-        print '%x %d %x' % (i.ethread, i.tid, i.startaddr)
-    print 'number:', len(l), 'cost time:', time.time()-starttime
+    if sys.argv[1]=='all':
+        inspectAllProcessHiddenThread()
+    else:
+        eprocessaddr=int(sys.argv[1], 16)
+        eprocessobj=pykd.typedVar('nt!_EPROCESS', eprocessaddr) 
+        info=ProcessInfo()
+        if info.init(eprocessaddr):
+            inspectHiddenThread(info)
+
     
 

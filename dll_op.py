@@ -7,52 +7,93 @@ import pykd
 from common import *
 
 class ModuleInfo(object):
-    def __init__(self, baseaddr=0, size=0, entrypoint=0, name='', dllpath=''):
-        self.baseaddr=baseaddr
-        self.size=size
-        self.entrypoint=entrypoint
-        self.dllpath=dllpath
-        self.name=name
-    
+    def init1(self, ldr):
+        try:
+            if not int(ldr):
+                return False
+                
+            filepath=revise_filepath(pykd.loadUnicodeString(ldr.FullDllName))
+            name=pykd.loadUnicodeString(ldr.BaseDllName)
+            self.filepath, self.name=guess_filepath(filepath, name)
+            
+            self.startaddr=int(ldr.DllBase)
+            self.entrypoint=int(ldr.EntryPoint)
+            self.size=int(ldr.SizeOfImage)
+            return True
+        except Exception, err:
+            print traceback.format_exc()
+            return False
+            
+    def init2(self, startaddr=0, endaddr=0, entrypoint=0, name='', filepath=''):
+        try:
+            self.startaddr=int(startaddr)
+            endaddr=int(endaddr)
+            
+            if endaddr>self.startaddr:
+                self.size=endaddr-self.startaddr
+            else:
+                self.size=0
+                
+            self.entrypoint=int(entrypoint)
+            filepath=revise_filepath(filepath)
+            self.filepath, self.name=guess_filepath(filepath, name)
+            return True
+        except Exception, err:
+            print traceback.format_exc()
+            return False
+            
 def listModuleByVadRoot(eprocessaddr):
+    modulelist=[]
     try:
         eprocess=pykd.typedVar('nt!_EPROCESS', eprocessaddr) 
         VadRoot=int(eprocess.VadRoot)
         if not VadRoot:
-            return
+            return []
         cmdline='!vad %x' % VadRoot
         r=pykd.dbgCommand(cmdline).splitlines()
         for i in r:
-            print i
+            i=i.strip()
+            pos=i.find('Exe  EXECUTE_')
+            if pos==-1:
+                continue
+
+            a=i[pos+len('Exe  '):]
+            pos=a.find(' ')
+            if pos==-1:
+                continue
+                    
+            type=a[:pos].strip()
+            filepath=a[pos+len('  '):].strip()
+            
+            pos=i.find(')')
+            if pos==-1:
+                continue
+            a=i[pos+1:].lstrip()
+            pos=a.find(' ')
+            if pos==-1:
+                continue
+            
+            startaddr=a[:pos].strip()
+            startaddr=int(startaddr, 16)*0x1000
+            
+            a=a[pos+1:].lstrip()
+            pos=a.find(' ')
+            if pos==-1:
+                continue
+            
+            endaddr=a[:pos].strip()
+            endaddr=int(endaddr, 16)*0x1000
+            info=ModuleInfo()
+            if info.init2(startaddr=startaddr, endaddr=endaddr, filepath=filepath):
+                modulelist.append(info)
+
     except Exception, err:
         print traceback.format_exc()
-
-def listModuleByPeb(eprocessaddr):
-    try:
-        cmdline='.process /P %x' % eprocessaddr
-        r=pykd.dbgCommand(cmdline)
-        r=pykd.dbgCommand('!peb').splitlines()
-        for i in r:
-            print i
-    except Exception, err:
-        print traceback.format_exc()
-
-def add_dll(dll_table, ldr):
-    try:
-        if int(ldr) in dll_table:
-            return
+    
+    return modulelist
         
-        fullpath=pykd.loadUnicodeString(ldr.FullDllName)
-        name=pykd.loadUnicodeString(ldr.BaseDllName)
-        startaddr=int(ldr.DllBase)
-        entrypoint=int(ldr.EntryPoint)
-        size=int(ldr.SizeOfImage)
-        mo=ModuleInfo(baseaddr=startaddr, size=size, entrypoint=entrypoint, name=name, dllpath=fullpath)
-        dll_table[int(ldr)]=mo
-    except Exception, err:
-        print traceback.format_exc()          
-        
-def getModuleByLdrList(dll_table, eprocessaddr):
+def listModuleByLdrList(eprocessaddr):
+    modulelist={}
     try:
         cmdline='.process /P %x' % eprocessaddr
         r=pykd.dbgCommand(cmdline)
@@ -66,13 +107,19 @@ def getModuleByLdrList(dll_table, eprocessaddr):
             entryList3=pykd.typedVarList(entry, 'nt!_LDR_DATA_TABLE_ENTRY', 'InInitializationOrderLinks')
             for entrylist in [entryList1, entryList2, entryList3]:
                 for ldr in entrylist:
-                    add_dll(dll_table, ldr)
-        else:
-            print 'peb is 0, no dlls'
+                    if int(ldr) not in modulelist:
+                        info=ModuleInfo()
+                        if info.init1(ldr):
+                            modulelist[int(ldr)]=info
+        
     except Exception, err:
         print traceback.format_exc()
-
-def getModuleByLdrHash(dll_table, eprocessaddr):
+        
+    return modulelist.values()
+    
+    
+def listModuleByLdrHash(eprocessaddr):
+    modulelist={}
     try:
         cmdline='.process /P %x' % eprocessaddr
         r=pykd.dbgCommand(cmdline)
@@ -89,31 +136,78 @@ def getModuleByLdrHash(dll_table, eprocessaddr):
                     if hashlink==listhead:
                         break
                     ldr=pykd.containingRecord(hashlink, 'nt!_LDR_DATA_TABLE_ENTRY', 'HashLinks')
-                    add_dll(dll_table, ldr)
-        else:
-            print 'peb is 0, no dlls'
+                    if int(ldr) not in modulelist:
+                        info=ModuleInfo()
+                        if info.init1(ldr):
+                            modulelist[int(ldr)]=info
+
     except Exception, err:
         print traceback.format_exc()
+    return modulelist.values()
     
-def getModules(eprocessaddr=None):
-    dll_table={}
-    try:
-        if not eprocessaddr:
-            PsActiveProcessHead=pykd.getOffset('nt!PsActiveProcessHead')
-            entry=pykd.ptrPtr(PsActiveProcessHead)
-            eprocessobj=pykd.containingRecord(entry, 'nt!_EPROCESS', 'ActiveProcessLinks')
-            eprocessaddr=int(eprocessobj)
-        
-        getModuleByLdrList(dll_table, eprocessaddr)
-        getModuleByLdrHash(dll_table, eprocessaddr)
-        
-    except Exception, err:
-        print traceback.format_exc() 
+def inspectHiddenModule(eprocessinfo):
+    funclist=\
+    [
+        listModuleByLdrList, 
+        listModuleByLdrHash, 
+    ]
     
-    return dll_table.values()
+    eprocessaddr=eprocessinfo.eprocessaddr
+    sourcemodulelist=listModuleByVadRoot(eprocessaddr)
+    if not sourcemodulelist:
+        return
+
+    printprocess=0
+    for func in funclist:
+        modulelist=func(eprocessaddr)
+        #print len(modulelist)
+        modulelist2={}
+        for i in modulelist:
+            modulelist2[i.startaddr]=i
+        
+        l=[]
+        for i in sourcemodulelist:
+            if i.startaddr not in modulelist2:
+                l.append(i)
+            else:
+                modulelist2.pop(i.startaddr)
+        
+        if l or modulelist2:
+            if not printprocess:
+                print '='*10, 'process:%x pid:%d %s' % (eprocessaddr, eprocessinfo.pid, eprocessinfo.filepath), '='*10
+                print 'baseaddr size entry name filepath'
+                printprocess=1
+                
+            if l:
+                print '!'*5, "following modules can not be found by %s" % func.func_name
+                for i in l:
+                    print '%x %x %x %s %s' % (i.startaddr, i.size, i.entrypoint, i.name, i.filepath)    
+                
+            if modulelist2:
+                print '!'*5, "following modules can be only found by %s" % func.func_name
+                for i in modulelist2.values():
+                    print '%x %x %x %s %s' % (i.startaddr, i.size, i.entrypoint, i.name, i.filepath)
+            print 
+            
+from process_op import *
+def inspectAllProcessHiddenModule():
+    processlist=listProcessByPsActiveProcessHead()
+    for i in processlist:
+        inspectHiddenModule(i)
+    print 
+    print 'inspect completely'
     
 if __name__=='__main__':
-    l=getModules(0x893cd020)
-    for i in l:
-        print '%x %x %x %s %s' % (i.baseaddr, i.size, i.entrypoint, i.name, i.dllpath)
-    print 'total numberL:', len(l)
+    if sys.argv[1]=='inspectall':
+        inspectAllProcessHiddenModule()
+    elif sys.argv[1]=='inspectone':
+        eprocessaddr=int(sys.argv[2], 16)
+        info=ProcessInfo()
+        if info.init(eprocessaddr):
+            inspectHiddenModule(info)
+    elif sys.argv[1]=='list':
+        eprocessaddr=int(sys.argv[2], 16)
+        modulelist=listModuleByVadRoot(eprocessaddr)
+        for i in modulelist:
+            print '%x %x %x %s %s' % (i.startaddr, i.size, i.entrypoint, i.name, i.filepath)
+            
