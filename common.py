@@ -8,7 +8,7 @@ import pykd
 import pefile
 import platform
 import win32api
-windowsdir=win32api.GetWindowsDirectory()
+
 
 pykd.attachKernel()
 if not pykd.isKernelDebugging():
@@ -31,9 +31,10 @@ for dirname in windbgextdirs:
         if i in default_exts:
             print filepath
             pykd.dbgCommand('.load %s' % filepath)
-print 'load extensions ok'
-nt = pykd.module( "nt" )
 
+print 'load extensions ok'
+windowsdir=win32api.GetWindowsDirectory()
+nt = pykd.module( "nt" )
 g_kernelsize=int(nt.size())
 g_kernelbase=int(nt.begin())
 module_entry=pykd.ptrMWord(pykd.getOffset('nt!PsLoadedModuleList'))
@@ -129,7 +130,17 @@ def revise_filepath(fullpath=''):
         windowsdir=win32api.GetWindowsDirectory()
         fullpath=os.path.join(windowsdir, fullpath[len('\\winnt\\'):])
         return fullpath
-        
+    
+    elif fullpath.startswith('\\'):
+        s=win32api.GetLogicalDriveStrings()
+        l=s.split('\x00')
+        for i in l:
+            if i!='':
+                drivername=i.rstrip('\\')
+                newfullpath=os.path.join(drivername, fullpath)
+                if os.path.exists(newfullpath):
+                    return newfullpath
+        return fullpath
     else:
         return fullpath
 

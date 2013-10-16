@@ -3495,15 +3495,25 @@ class PE:
                 #
                 if symbol_address >= rva and symbol_address < rva+size:
                     forwarder_str = self.get_string_at_rva(symbol_address)
+                    try:
+                        forwarder_offset = self.get_offset_from_rva( symbol_address )
+                    except PEFormatError:
+                        continue
                 else:
                     forwarder_str = None
+                    forwarder_offset=None
 
                 exports.append(
                     ExportData(
+                        pe = self,
                         ordinal = export_dir.Base+idx,
+                        ordinal_offset = self.get_offset_from_rva( export_dir.AddressOfNameOrdinals + 2*idx ),
                         address = symbol_address,
+                        address_offset = self.get_offset_from_rva( export_dir.AddressOfFunctions + 4*idx ),
                         name = None,
-                        forwarder = forwarder_str))
+                        name_offset = None,
+                        forwarder = forwarder_str, 
+                        forwarder_offset = forwarder_offset ))
 
         return ExportDirData(
                 struct = export_dir,
@@ -5021,4 +5031,5 @@ class PE:
         if section_alignment and val % section_alignment:
             return section_alignment * ( val / section_alignment )
         return val
+
 

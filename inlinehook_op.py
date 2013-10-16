@@ -7,26 +7,6 @@ import pefile
 import pykd
 from common import *
 
-def repairInlineHook(modulepath, startaddr, endaddr, eprocessaddr=None):
-    try:
-        symbolpath=g_sympath+';'+os.path.abspath(os.path.dirname(modulepath))
-        if eprocessaddr:
-            cmdline='.process /P %x;.sympath %s;' % (eprocessaddr, symbolpath)
-            r=pykd.dbgCommand(cmdline)
-        cmdline='.reload;'
-        r=pykd.dbgCommand(cmdline)
-        
-        if modulepath==g_kernelpath:
-            cmdline='!chkimg nt -r %x %x -v -d -f' % (startaddr, endaddr)
-        else:
-            cmdline='!chkimg %s -r %x %x -v -d -f' % (os.path.basename(modulepath), startaddr, endaddr)
-        
-        r=pykd.dbgCommand(cmdline)
-        for i in r:
-            print i
-    except Exception, err:
-        print traceback.format_exc()
-        
 def inspectInlineHook(modulepath=g_kernelpath, baseaddr=g_kernelbase, eprocessaddr=None):
     try:
         print '='*10, 'scan inlinehook in %s' % modulepath, '='*10
@@ -42,6 +22,7 @@ def inspectInlineHook(modulepath=g_kernelpath, baseaddr=g_kernelbase, eprocessad
             r=pykd.dbgCommand(cmdline)
         cmdline='.reload;'
         r=pykd.dbgCommand(cmdline)
+        
         filedata=open(modulepath, 'rb').read()
         pe = pefile.PE(data=filedata, fast_load=True)
         if pe.DOS_HEADER.e_magic!=0X5A4D or pe.NT_HEADERS.Signature!=0x4550:
@@ -67,6 +48,7 @@ def inspectInlineHook(modulepath=g_kernelpath, baseaddr=g_kernelbase, eprocessad
                 else:
                     name=os.path.splitext(os.path.basename(modulepath))[0]
                     cmdline='!chkimg %s -r %x %x -v -d' % (name, memoffsetstart, memoffsetend)
+                    #repair cmdline='!chkimg %s -r %x %x -v -d -f' % (os.path.basename(modulepath), startaddr, endaddr)
                 #print cmdline
                 r=pykd.dbgCommand(cmdline)
                 if r.find('[')!=-1:
@@ -90,6 +72,8 @@ def inspectAllRing0InlineHook():
         if os.path.exists(i.filepath) and i.baseaddr:
             inspectInlineHook(i.filepath, i.baseaddr)
             print
+    print 
+    print 'inspect completely'
     
 from dll_op import *
 def inspectAllRing3InlineHook():
@@ -100,24 +84,30 @@ def inspectAllRing3InlineHook():
         if not modulelist:
             print 'the process has no modules(vadroot is null)'
         for i in modulelist:
-            if os.path.exists(i.filepath) and i.startaddr:
-                inspectInlineHook(i.filepath, i.startaddr, eprocessinfo.eprocessaddr)
+            if os.path.exists(i.filepath) and i.baseaddr:
+                inspectInlineHook(i.filepath, i.baseaddr, eprocessinfo.eprocessaddr)
                 print
-
+    print 
+    print 'inspect completely'
+    
 def inspectProcessInlineHook(eprocessaddr):
     modulelist=listModuleByVadRoot(eprocessaddr)
     if not modulelist:
         print 'the process has no modules(vadroot is null)'
     for i in modulelist:
-        if os.path.exists(i.filepath) and i.startaddr:
-            inspectInlineHook(i.filepath, i.startaddr, eprocessinfo.eprocessaddr)
+        if os.path.exists(i.filepath) and i.baseaddr:
+            inspectInlineHook(i.filepath, i.baseaddr, eprocessinfo.eprocessaddr)
             print
-
+    print 
+    print 'inspect completely'
+    
 def inspectDriverInlineHook(driverobjectaddr):
     info=DriverInfo()
     if info.init1(driverobjectaddr):
         inspectInlineHook(info.filepath, info.baseaddr)
-
+    print 
+    print 'inspect completely'
+    
 if __name__=='__main__':
     if sys.argv[1]=='allring0':
         inspectAllRing0InlineHook()

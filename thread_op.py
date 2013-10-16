@@ -37,11 +37,11 @@ def inspectHiddenThread(eprocessinfo):
                 threadlist[int(i)]=ThreadInfo(i)
         
         if hiddenthreadlist:
-            print '!'*10, 'process:%x pid:%d %s' % (eprocessaddr, eprocessinfo.pid, eprocessinfo.fullpath), '!'*10
+            print '!'*10, 'process:%x pid:%d %s' % (eprocessaddr, eprocessinfo.pid, eprocessinfo.filepath), '!'*10
             for i in hiddenthreadlist:
                 print 'ethread:%x tid:%d entry:%x' % (i.ethreadaddr, i.tid, i.startaddr)
         else:
-            print '='*10, 'process:%x pid:%d %s has no hidden thread' % (eprocessaddr, eprocessinfo.pid, eprocessinfo.fullpath), '='*10
+            print '='*10, 'process:%x pid:%d %s has no hidden thread' % (eprocessaddr, eprocessinfo.pid, eprocessinfo.filepath), '='*10
     except Exception, err:
         print traceback.format_exc()
 

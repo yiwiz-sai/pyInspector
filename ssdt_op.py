@@ -29,7 +29,7 @@ def inspectSSDT():
     table_fileoffset=pe.get_offset_from_rva(table_rva)
     print 'KiServiceTable file offset:0x%x' % table_fileoffset
     d=filedata[table_fileoffset:table_fileoffset+g_mwordsize*serviceCount]
-    hooklist=[]
+    number=0
     for i in xrange(serviceCount):
         source=binascii.b2a_hex(d[i*g_mwordsize:(i+1)*g_mwordsize][::-1])
         source=pykd.addr64(int(source, 16))-pykd.addr64(pe.OPTIONAL_HEADER.ImageBase)+kernelbase
@@ -38,13 +38,10 @@ def inspectSSDT():
         if source==current:
             print 'source:0x%x current:0x%x %s' % (source, current, symbolname)
         else:
-            print 'source:0x%x current:0x%x %s hooked!!!!!!!' % (source, current, symbolname)
-            hooklist.append([source, current, symbolname])
-    print '='*10+'hook function list'+'='*10
-    for i in hooklist:
-        print i
-        
-    print 'hooked function number:', len(hooklist)
+            hooksymbolname=pykd.findSymbol(current)
+            print 'source:0x%x %s <-> current:0x%x %s hooked!!!!!!!' % (source, symbolname, current, hooksymbolname)
+            number+=1
+    print 'hooked function number:', number
 
 if __name__ == "__main__":
     inspectSSDT()

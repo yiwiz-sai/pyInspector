@@ -151,6 +151,8 @@ def inspectHiddenProcess():
                 pidlist2.remove(i.pid)
         for i in pidlist2:
             print "pid %d can't be found by %s" % (i, func.func_name)
-
+    print 
+    print 'inspect completely'
+    
 if __name__=='__main__':
     inspectHiddenProcess()

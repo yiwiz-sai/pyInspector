@@ -16,7 +16,7 @@ class ModuleInfo(object):
             name=pykd.loadUnicodeString(ldr.BaseDllName)
             self.filepath, self.name=guess_filepath(filepath, name)
             
-            self.startaddr=int(ldr.DllBase)
+            self.baseaddr=int(ldr.DllBase)
             self.entrypoint=int(ldr.EntryPoint)
             self.size=int(ldr.SizeOfImage)
             return True
@@ -24,13 +24,13 @@ class ModuleInfo(object):
             print traceback.format_exc()
             return False
             
-    def init2(self, startaddr=0, endaddr=0, entrypoint=0, name='', filepath=''):
+    def init2(self, baseaddr=0, endaddr=0, entrypoint=0, name='', filepath=''):
         try:
-            self.startaddr=int(startaddr)
+            self.baseaddr=int(baseaddr)
             endaddr=int(endaddr)
             
-            if endaddr>self.startaddr:
-                self.size=endaddr-self.startaddr
+            if endaddr>self.baseaddr:
+                self.size=endaddr-self.baseaddr
             else:
                 self.size=0
                 
@@ -73,8 +73,8 @@ def listModuleByVadRoot(eprocessaddr):
             if pos==-1:
                 continue
             
-            startaddr=a[:pos].strip()
-            startaddr=int(startaddr, 16)*0x1000
+            baseaddr=a[:pos].strip()
+            baseaddr=int(baseaddr, 16)*0x1000
             
             a=a[pos+1:].lstrip()
             pos=a.find(' ')
@@ -84,7 +84,7 @@ def listModuleByVadRoot(eprocessaddr):
             endaddr=a[:pos].strip()
             endaddr=int(endaddr, 16)*0x1000
             info=ModuleInfo()
-            if info.init2(startaddr=startaddr, endaddr=endaddr, filepath=filepath):
+            if info.init2(baseaddr=baseaddr, endaddr=endaddr, filepath=filepath):
                 modulelist.append(info)
 
     except Exception, err:
@@ -111,6 +111,8 @@ def listModuleByLdrList(eprocessaddr):
                         info=ModuleInfo()
                         if info.init1(ldr):
                             modulelist[int(ldr)]=info
+        else:
+            print 'peb is 0'
         
     except Exception, err:
         print traceback.format_exc()
@@ -163,14 +165,14 @@ def inspectHiddenModule(eprocessinfo):
         #print len(modulelist)
         modulelist2={}
         for i in modulelist:
-            modulelist2[i.startaddr]=i
+            modulelist2[i.baseaddr]=i
         
         l=[]
         for i in sourcemodulelist:
-            if i.startaddr not in modulelist2:
+            if i.baseaddr not in modulelist2:
                 l.append(i)
             else:
-                modulelist2.pop(i.startaddr)
+                modulelist2.pop(i.baseaddr)
         
         if l or modulelist2:
             if not printprocess:
@@ -181,12 +183,12 @@ def inspectHiddenModule(eprocessinfo):
             if l:
                 print '!'*5, "following modules can not be found by %s" % func.func_name
                 for i in l:
-                    print '%x %x %x %s %s' % (i.startaddr, i.size, i.entrypoint, i.name, i.filepath)    
+                    print '%x %x %x %s %s' % (i.baseaddr, i.size, i.entrypoint, i.name, i.filepath)    
                 
             if modulelist2:
                 print '!'*5, "following modules can be only found by %s" % func.func_name
                 for i in modulelist2.values():
-                    print '%x %x %x %s %s' % (i.startaddr, i.size, i.entrypoint, i.name, i.filepath)
+                    print '%x %x %x %s %s' % (i.baseaddr, i.size, i.entrypoint, i.name, i.filepath)
             print 
             
 from process_op import *
@@ -207,7 +209,8 @@ if __name__=='__main__':
             inspectHiddenModule(info)
     elif sys.argv[1]=='list':
         eprocessaddr=int(sys.argv[2], 16)
-        modulelist=listModuleByVadRoot(eprocessaddr)
+        #modulelist=listModuleByVadRoot(eprocessaddr)
+        modulelist=listModuleByLdrList(eprocessaddr)
         for i in modulelist:
-            print '%x %x %x %s %s' % (i.startaddr, i.size, i.entrypoint, i.name, i.filepath)
+            print '%x %x %x %s %s' % (i.baseaddr, i.size, i.entrypoint, i.name, i.filepath)
             

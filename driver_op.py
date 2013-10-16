@@ -154,7 +154,9 @@ def inspectAllDispatchRoutine():
         driverlist=func()
         for i in driverlist:
             inspectDispatchRoutine(i)
-    pass
+    print 
+    print 'inspect completely'
+    
     
 def inspectHiddenDriver():
     funclist=\
@@ -168,7 +170,9 @@ def inspectHiddenDriver():
         driverlist=func()
         for i in driverlist:
             print '%x %x %x %x %s %s' % (i.driverobjectaddr, i.baseaddr, i.modulesize,i.entrypoint, i.name, i.filepath)
-
+    print 
+    print 'inspect completely'
+    
 if __name__=='__main__':
     if sys.argv[1]=='alldriver':
         inspectHiddenDriver()
