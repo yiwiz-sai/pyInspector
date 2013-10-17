@@ -158,10 +158,10 @@ def inspectHiddenProcess():
         print traceback.format_exc()
 def help():
     print '-inspect'
-    print '-list0 eprocessaddr #listProcessByPsActiveProcessHead'
-    print '-list1 eprocessaddr #listProcessBySessionProcessLinks'
-    print '-list2 eprocessaddr #listProcessByWorkingSetExpansionLinks'
-    print '-list3 eprocessaddr #listProcessByPspcidTable'
+    print '-list0 #listProcessByPsActiveProcessHead'
+    print '-list1 #listProcessBySessionProcessLinks'
+    print '-list2 #listProcessByWorkingSetExpansionLinks'
+    print '-list3 #listProcessByPspcidTable'
     
 
 if __name__=='__main__':
