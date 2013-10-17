@@ -7,19 +7,16 @@ import pefile
 import pykd
 from common import *
 
-def inspectInlineHook(modulepath=g_kernelpath, baseaddr=g_kernelbase, eprocessaddr=None):
+def inspectInlineHook(modulepath, modulebase):
     try:
         print '='*10, 'scan inlinehook in %s' % modulepath, '='*10
-        windowsdir=win32api.GetWindowsDirectory()
-        system32dir=os.path.join(windowsdir, 'system32')
-        driversdir=os.path.join(windowsdir, 'system32', 'drivers')
-        symbolpath='%s;%s;%s;%s;' % (g_sympath, system32dir, driversdir,os.path.abspath(os.path.dirname(modulepath)))
-        if eprocessaddr:
-            cmdline='.process /P %x;.sympath %s' % (eprocessaddr, symbolpath)
-            r=pykd.dbgCommand(cmdline)
-        else:
-            cmdline='.sympath %s' % symbolpath
-            r=pykd.dbgCommand(cmdline)
+        driversdir=os.path.join(g_system32dir, 'drivers')
+        symbolpath=g_sympath
+        symbolpath=add_symbolpath(symbolpath, driversdir)
+        symbolpath=add_symbolpath(symbolpath, os.path.dirname(modulepath))
+       
+        cmdline='.sympath %s' % symbolpath
+        r=pykd.dbgCommand(cmdline)
         cmdline='.reload;'
         r=pykd.dbgCommand(cmdline)
         
@@ -39,10 +36,10 @@ def inspectInlineHook(modulepath=g_kernelpath, baseaddr=g_kernelbase, eprocessad
                 comparesize=i.Misc_VirtualSize
                 fileoffsetstart=i.PointerToRawData
                 fileoffsetend=fileoffsetstart+comparesize
-                memoffsetstart=baseaddr+ i.VirtualAddress
+                memoffsetstart=modulebase+ i.VirtualAddress
                 memoffsetend=memoffsetstart+comparesize
                 print '-'*10
-                print '%s :%x %x <--> %x %x  size:%d' % (i.Name, fileoffsetstart, fileoffsetend, memoffsetstart, memoffsetend, comparesize)
+                print '%s :%x-%x <--> %x-%x  size:%d' % (i.Name, fileoffsetstart, fileoffsetend, memoffsetstart, memoffsetend, comparesize)
                 if modulepath.lower()==g_kernelpath.lower():
                     cmdline='!chkimg nt -r %x %x -v -d' % (memoffsetstart, memoffsetend)
                 else:
@@ -65,59 +62,100 @@ def inspectInlineHook(modulepath=g_kernelpath, baseaddr=g_kernelbase, eprocessad
     except Exception, err:
         print traceback.format_exc()
 
-from driver_op import *
-def inspectAllRing0InlineHook():
-    driverlist=listDriverByPsLoadedModuleList()
-    for i in driverlist:
-        if os.path.exists(i.filepath) and i.baseaddr:
-            inspectInlineHook(i.filepath, i.baseaddr)
-            print
-    print 
-    print 'inspect completely'
-    
+
 from dll_op import *
-def inspectAllRing3InlineHook():
-    processlist=listProcessByPsActiveProcessHead()
+def inspectProcessInlineHook(eprocessaddr=None):
+    if eprocessaddr:
+        eprocessobj=pykd.typedVar('nt!_EPROCESS', eprocessaddr)
+        eprocessinfo=ProcessInfo()
+        if not eprocessinfo.init(eprocessobj):
+            print 'it is not a eprocess'
+            return
+        processlist=[eprocessinfo]   
+    else:
+        processlist=listProcessByPsActiveProcessHead()
+        if not processlist:
+            print 'can not get process list'
+            return
+
     for eprocessinfo in processlist:
         print '='*10, 'process:%x pid:%d %s' % (eprocessinfo.eprocessaddr, eprocessinfo.pid, eprocessinfo.filepath), '='*10
         modulelist=listModuleByVadRoot(eprocessinfo.eprocessaddr)
         if not modulelist:
             print 'the process has no modules(vadroot is null)'
+            continue
+        
+        cmdline='.process /P %x' % eprocessinfo.eprocessaddr
+        r=pykd.dbgCommand(cmdline)
         for i in modulelist:
-            if os.path.exists(i.filepath) and i.baseaddr:
-                inspectInlineHook(i.filepath, i.baseaddr, eprocessinfo.eprocessaddr)
-                print
-    print 
-    print 'inspect completely'
-    
-def inspectProcessInlineHook(eprocessaddr):
-    modulelist=listModuleByVadRoot(eprocessaddr)
-    if not modulelist:
-        print 'the process has no modules(vadroot is null)'
-    for i in modulelist:
-        if os.path.exists(i.filepath) and i.baseaddr:
-            inspectInlineHook(i.filepath, i.baseaddr, eprocessinfo.eprocessaddr)
+            modulepath=i.filepath
+            modulebase=i.baseaddr
+            if not os.path.exists(modulepath):
+                print "can't find file:%s" % modulepath
+                continue
+
+            inspectInlineHook(modulepath, modulebase)
             print
+            
     print 
     print 'inspect completely'
     
-def inspectDriverInlineHook(driverobjectaddr):
-    info=DriverInfo()
-    if info.init1(driverobjectaddr):
-        inspectInlineHook(info.filepath, info.baseaddr)
+from driver_op import *
+def inspectDriverInlineHook(driverobjectaddr=None):
+    if driverobjectaddr:
+        driverinfo=DriverInfo()
+        if not driverinfo.init1(driverobjectaddr):
+            print 'fail to get driver info'
+            return
+        driverlist=[driverinfo]
+    else:
+        driverlist=listDriverByPsLoadedModuleList()
+        if not driverlist:
+            print 'can not get driver list'
+            return
+            
+    for i in driverlist:
+        modulepath=i.filepath
+        modulebase=i.baseaddr
+        if not os.path.exists(modulepath):
+            print "can't find file:%s" % modulepath
+            continue
+
+        inspectInlineHook(modulepath, modulebase)
+        print
+        
     print 
     print 'inspect completely'
+
+
+def help():
+    print '-inspectallprocess'
+    print '-inspectprocess eprocessaddr'
+    print '-inspectalldriver'
+    print '-inspectdriver driverobjectaddr'
     
 if __name__=='__main__':
-    if sys.argv[1]=='allring0':
-        inspectAllRing0InlineHook()
-    elif sys.argv[1]=='allring3':
-        inspectAllRing3InlineHook()
-    elif sys.argv[1]=='ring0':
-        driverobjectaddr=int(sys.argv[2], 16)
-        inspectDriverInlineHook(driverobjectaddr)
-    elif sys.argv[1]=='ring3':
-        eprocessaddr=int(sys.argv[2], 16)
-        inspectProcessInlineHook(eprocessaddr)
-    pass
+    try:
+        if len(sys.argv)<2:
+            help()
+            sys.exit(0)
+            
+        if sys.argv[1]=='-inspectallprocess':
+            inspectProcessInlineHook()
+                
+        elif sys.argv[1]=='-inspectalldriver':
+            inspectDriverInlineHook()
+    
+        elif sys.argv[1]=='-inspectprocess':
+            eprocessaddr=int(sys.argv[2], 16)
+            inspectProcessInlineHook(eprocessaddr)
 
+        elif sys.argv[1]=='-inspectdriver':
+            driverobjectaddr=int(sys.argv[2], 16)
+            inspectDriverInlineHook(driverobjectaddr)
+            
+        else:
+            help()
+            
+    except Exception, err:
+        print traceback.format_exc() 

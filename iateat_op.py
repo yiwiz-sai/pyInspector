@@ -22,15 +22,16 @@ class ExportFuncInfo(object):
         pass
 
 class ImportFuncInfo(object):
-    def __init__(self, funcname='', sourcemodulename='', importmodulename='', iatoffset=0, ordinal=-1):
+    def __init__(self, funcname='', sourcemodulename='', importmodulename='', baseaddr=0, iatoffset=0, ordinal=-1, ):
         super(ImportFuncInfo, self).__init__()
         self.iatoffset=iatoffset
         self.funcname=funcname
         self.sourcemodulename=sourcemodulename
         self.importmodulename=importmodulename
         self.ordinal=ordinal
+        self.baseaddr=baseaddr
         
-def inspectIatEatHook(modulelist, eprocessaddr=None):
+def inspectIatEatHook(modulelist, eprocessaddr=None, targetmodulebase=None):
     try:
         if eprocessaddr:
             cmdline='.process /P /r %x' % eprocessaddr
@@ -77,40 +78,68 @@ def inspectIatEatHook(modulelist, eprocessaddr=None):
                         iatoffset=i.address-pe.OPTIONAL_HEADER.ImageBase+baseaddr
                         funcname=i.name
                         #print '%s %s %x %x %s' % (importname, funcname,  baseaddr, iatoffset, i.ordinal)
-                        info=ImportFuncInfo(funcname, modulename, importname, iatoffset, i.ordinal)
+                        info=ImportFuncInfo(funcname, modulename, importname, baseaddr, iatoffset, i.ordinal)
                         importfunctable.append(info)
-        
 
         #for info in exportfunctable.values():
         #    print info.funcname, hex(info.funcaddr)
         #return
-        #print 'inspect EATHOOK'
         #inspect export table
         for info in exportfunctable.values():
-            currentoffsetvalue=pykd.ptrDWord(info.funcoffset+info.baseaddr)
-            sourceoffsetvalue=info.funcaddr-info.baseaddr
-            if sourceoffsetvalue!=currentoffsetvalue:
-                print 'EATHOOK:(%s!%s) baseaddr:%x offset:%x value:%x<->%x' % (info.modulename, info.funcname, info.baseaddr, info.funcoffset, sourceoffsetvalue, currentoffsetvalue)
-        #print 'inspect IATHOOK'
+            if not targetmodulebase or (targetmodulebase==info.baseaddr):
+                sourceoffsetvalue=info.funcaddr-info.baseaddr
+                try:
+                    currentoffsetvalue=pykd.ptrDWord(info.funcoffset+info.baseaddr)
+                except Exception, err:
+                    print 'EATHOOK:(%s!%s) baseaddr:%x offset:%x value:%x<->????????' % (info.modulename, info.funcname, info.baseaddr, info.funcoffset, sourceoffsetvalue)
+                    continue
+                if sourceoffsetvalue!=currentoffsetvalue:
+                    print 'EATHOOK:(%s!%s) baseaddr:%x offset:%x value:%x<->%x' % (info.modulename, info.funcname, info.baseaddr, info.funcoffset, sourceoffsetvalue, currentoffsetvalue)
+                
+        print 'inspect EATHOOK completely'
         #inspect import table
         for i in importfunctable:
-            currentfuncaddr=pykd.ptrPtr(i.iatoffset)
-            if not exportfunctable.get(currentfuncaddr):
-                hookfuncname=pykd.findSymbol(currentfuncaddr)
-                if i.ordinal:
-                    #by ordinal
-                    print 'IATHOOK:(source:%s import:%s!%d)%x<->%x(%s)' % (i.sourcemodulename, i.importmodulename,i.ordinal,0 , currentfuncaddr, hookfuncname)
-                else:
-                    #by name
-                    print 'IATHOOK:(source:%s import:%s!%s)%x<->%x(%s)' % (i.sourcemodulename, i.importmodulename,i.funcname, 0, currentfuncaddr, hookfuncname)
+            if not targetmodulebase or (targetmodulebase==i.baseaddr):
+                try:
+                    currentfuncaddr=pykd.ptrPtr(i.iatoffset)
+                except Exception, err:
+                    if i.ordinal:
+                        #by ordinal
+                        print 'IATHOOK:(source:%s import:idx:%s!%d)<->????????' % (i.sourcemodulename, i.importmodulename,i.ordinal)
+                    else:
+                        #by name
+                        print 'IATHOOK:(source:%s import:%s!%s)<->????????' % (i.sourcemodulename, i.importmodulename,i.funcname)
 
+                    continue
+                    
+                if not exportfunctable.get(currentfuncaddr):
+                    hookfuncname=pykd.findSymbol(currentfuncaddr)
+                    if i.ordinal:
+                        #by ordinal
+                        print 'IATHOOK:(source:%s import:%s!idx:%d)<->%x(%s)' % (i.sourcemodulename, i.importmodulename,i.ordinal, currentfuncaddr, hookfuncname)
+                    else:
+                        #by name
+                        print 'IATHOOK:(source:%s import:%s!%s)<->%x(%s)' % (i.sourcemodulename, i.importmodulename,i.funcname, currentfuncaddr, hookfuncname)
+        print 'inspect IATHOOK completely'
     except Exception, err:
         print traceback.format_exc()
 
   
 from dll_op import *
-def inspectAllRing3IatEatHook():
-    processlist=listProcessByPsActiveProcessHead()
+def inspectProcessIatEatHook(eprocessaddr=None):
+    if eprocessaddr:
+        eprocessobj=pykd.typedVar('nt!_EPROCESS', eprocessaddr)
+        eprocessinfo=ProcessInfo()
+        if not eprocessinfo.init(eprocessobj):
+            print 'it is not a eprocess'
+            return
+        processlist=[eprocessinfo]   
+    else:
+        processlist=listProcessByPsActiveProcessHead()
+        if not processlist:
+            print 'can not get process list'
+            return
+
     for eprocessinfo in processlist:
         print '='*10, 'process:%x pid:%d %s' % (eprocessinfo.eprocessaddr, eprocessinfo.pid, eprocessinfo.filepath), '='*10
         modulelist=listModuleByVadRoot(eprocessinfo.eprocessaddr)
@@ -118,62 +147,50 @@ def inspectAllRing3IatEatHook():
             print 'the process has no modules(vadroot is null)'
         else:
             inspectIatEatHook(modulelist, eprocessinfo.eprocessaddr)
-    print 
-    print 'inspect completely'
-    
-def inspectProcessIatEatHook(eprocessaddr):
-    modulelist=listModuleByVadRoot(eprocessaddr)
-    if not modulelist:
-        print 'the process has no modules(vadroot is null)'
-    else:
-        inspectIatEatHook(modulelist, eprocessaddr)
+            
     print 
     print 'inspect completely'
     
 from driver_op import *
-def inspectDriverIatEatHook():
+def inspectDriverIatEatHook(driverbase=None):
     driverlist=listDriverByPsLoadedModuleList()
     if not driverlist:
         print 'can not get driver list'
-    else:
-        inspectIatEatHook(driverlist)
+        return
+    
+    inspectIatEatHook(driverlist, targetmodulebase=driverbase)
     print 
     print 'inspect completely'
+
+def help():
+    print '-inspectallprocess'
+    print '-inspectprocess eprocessaddr'
+    print '-inspectalldriver'
+    print '-inspectdriver driverbase'
     
 if __name__=='__main__':
-    if sys.argv[1]=='allring3':
-        inspectAllRing3IatEatHook()
-    elif sys.argv[1]=='allring0':
-        inspectDriverIatEatHook()
-    elif sys.argv[1]=='ring3':
-        eprocessaddr=int(sys.argv[2], 16)
-        eprocessobj=pykd.typedVar('nt!_EPROCESS', eprocessaddr) 
-        eprocessinfo=ProcessInfo()
-        if eprocessinfo.init(eprocessobj):
-            print '='*10, 'process:%x pid:%d %s' % (eprocessinfo.eprocessaddr, eprocessinfo.pid, eprocessinfo.filepath), '='*10
+    try:
+        if len(sys.argv)<2:
+            help()
+            sys.exit(0)
+            
+        if sys.argv[1]=='-inspectallprocess':
+            inspectProcessIatEatHook()
+                
+        elif sys.argv[1]=='-inspectalldriver':
+            inspectDriverIatEatHook()
+    
+        elif sys.argv[1]=='-inspectprocess':
+            eprocessaddr=int(sys.argv[2], 16)
             inspectProcessIatEatHook(eprocessaddr)
-    pass
 
-'''    
-try:
-    memdata=''
-    cmdline='db %x %x' % (memoffsetstart, memoffsetend-1)
-    r=pykd.dbgCommand(cmdline)
-    r=r.splitlines()
-    for i in r:
-        r=i.strip().split('  ')[1].split(' ')
-        for j in r:
-            for a in j.split('-'):
-                memdata+=a
-    #memdata=binascii.a2b_hex(memdata)
-    rawdata=filedata[fileoffsetstart:fileoffsetend]
-    print binascii.b2a_hex(rawdata)[0:10]
-    print memdata[0:10]
-    #if memdata!=rawdata:
-    #    print 'fuck'
-    #else:
-    #   print 'ok'
-    #print len(memdata), len(memdata2), len(rawdata)
-except Exception, err:
-    print err
-'''
+        elif sys.argv[1]=='-inspectdriver':
+            driverbase=int(sys.argv[2], 16)
+            inspectDriverIatEatHook(driverbase)
+            
+        else:
+            help()
+            
+    except Exception, err:
+        print traceback.format_exc() 
+

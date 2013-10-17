@@ -23,5 +23,4 @@ def listIDT():
         print err
 
 if __name__=='__main__':
-    listIDT()
-    pass
+    print 'no support'

@@ -130,29 +130,71 @@ import win32process
 import copy
 
 def inspectHiddenProcess():
-    pidlist=list(win32process.EnumProcesses())
-    funclist=\
-    [
-        listProcessByPsActiveProcessHead, 
-        listProcessBySessionProcessLinks, 
-        listProcessByWorkingSetExpansionLinks, 
-        listProcessByPspcidTable, 
-    ]
-    print 'eprocess pid ppid peb name filepath'
-    for func in funclist:
-        print '-'*10,'find hidden process by %s' % func.func_name,'-'*10
-        processlist=func()
-        #print len(processlist)
-        pidlist2=copy.deepcopy(pidlist) 
-        for i in processlist:
-            if i.pid not in pidlist2:
-                print '%x %5d %5d %x %s %s' % (i.eprocessaddr, i.pid, i.parentpid, i.peb, i.name, i.filepath)
-            else:
-                pidlist2.remove(i.pid)
-        for i in pidlist2:
-            print "pid %d can't be found by %s" % (i, func.func_name)
-    print 
-    print 'inspect completely'
+    try:
+        pidlist=list(win32process.EnumProcesses())
+        funclist=\
+        [
+            listProcessByPsActiveProcessHead, 
+            listProcessBySessionProcessLinks, 
+            listProcessByWorkingSetExpansionLinks, 
+            listProcessByPspcidTable, 
+        ]
+        print 'eprocess pid ppid peb name filepath'
+        for func in funclist:
+            print '-'*10,'find hidden process by %s' % func.func_name,'-'*10
+            processlist=func()
+            #print len(processlist)
+            pidlist2=copy.deepcopy(pidlist) 
+            for i in processlist:
+                if i.pid not in pidlist2:
+                    print '%x %5d %5d %x %s %s' % (i.eprocessaddr, i.pid, i.parentpid, i.peb, i.name, i.filepath)
+                else:
+                    pidlist2.remove(i.pid)
+            for i in pidlist2:
+                print "pid %d can't be found by %s" % (i, func.func_name)
+        print 
+        print 'inspect completely'
+    except Exception, err:
+        print traceback.format_exc()
+def help():
+    print '-inspect'
+    print '-list0 eprocessaddr #listProcessByPsActiveProcessHead'
+    print '-list1 eprocessaddr #listProcessBySessionProcessLinks'
+    print '-list2 eprocessaddr #listProcessByWorkingSetExpansionLinks'
+    print '-list3 eprocessaddr #listProcessByPspcidTable'
     
+
 if __name__=='__main__':
-    inspectHiddenProcess()
+    try:
+        if len(sys.argv)<2:
+            help()
+            sys.exit(0)
+            
+        if sys.argv[1]=='-inspect':
+            inspectHiddenProcess()
+        elif sys.argv[1]=='-list0':
+            processlist=listProcessByPsActiveProcessHead()
+            for i in processlist:
+                print '%x %5d %5d %x %s %s' % (i.eprocessaddr, i.pid, i.parentpid, i.peb, i.name, i.filepath)
+                
+        elif sys.argv[1]=='-list1':
+            processlist=listProcessBySessionProcessLinks()
+            for i in processlist:
+                print '%x %5d %5d %x %s %s' % (i.eprocessaddr, i.pid, i.parentpid, i.peb, i.name, i.filepath)
+                
+        elif sys.argv[1]=='-list2':
+            processlist=listProcessByWorkingSetExpansionLinks()
+            for i in processlist:
+                print '%x %5d %5d %x %s %s' % (i.eprocessaddr, i.pid, i.parentpid, i.peb, i.name, i.filepath)
+                
+        elif sys.argv[1]=='-list3':
+            processlist=listProcessByPspcidTable()
+            for i in processlist:
+                print '%x %5d %5d %x %s %s' % (i.eprocessaddr, i.pid, i.parentpid, i.peb, i.name, i.filepath)
+                
+        else:
+            help()
+    except Exception, err:
+        print traceback.format_exc()
+        
+

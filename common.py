@@ -8,32 +8,55 @@ import pykd
 import pefile
 import platform
 import win32api
+import json
 
+def add_symbolpath(sympath, newdir):
+    if sympath.endswith(';'):
+        return sympath+newdir
+    else:
+        return sympath+';'+newdir
+    
+g_windowsdir=win32api.GetWindowsDirectory()
+g_system32dir=os.path.join(g_windowsdir, 'system32')
 
+config=open('config.txt', 'rb').read()
+config=json.loads(config)
+windbgpath=config.get('windbgpath')
+if not os.path.exists(windbgpath):
+    raise Exception('%s not exists, modify your config.txt' % windbgpath)
+    
 pykd.attachKernel()
 if not pykd.isKernelDebugging():
     raise Exception("not a kernel debugging")
 print 'load symbol, wait....'
+
+g_sympath=config.get('sympath')
+if not g_sympath:
+    raise Exception('%s can not be null')
+
+print 'your sympath:%s' %   g_sympath
+g_sympath=add_symbolpath(g_sympath, g_windowsdir)
+g_sympath=add_symbolpath(g_sympath, g_system32dir)
+pykd.dbgCommand('.sympath %s' % g_sympath)
 pykd.dbgCommand('.reload *')
 print 'load symbol ok!'
 windbgextdirs=['winxp', 'winext']
 default_exts=['kdexts.dll', 'ext.dll', 'exts.dll','kext.dll','kdexts.dll', 'ntsdexts.dll']
-for dirname in windbgextdirs:
-    windbgpath=r'C:\Program Files\Windows Kits\*\Debuggers\x86\%s' % dirname
-    fl=glob.glob(windbgpath)
+for extdirname in windbgextdirs:
+    extdirpath=os.path.join(windbgpath, extdirname)
+    fl=glob.glob(extdirpath)
     if not fl:
-        raise Exception('%s not exists' % windbgpath)
+        raise Exception('%s not exists, have you installed the latest windbg?' % extdirpath)
     
     dirpath=fl[0]
     l=os.listdir(dirpath)
     for i in l:
         filepath=os.path.join(dirpath, i)
         if i in default_exts:
-            print filepath
+            print 'load', filepath
             pykd.dbgCommand('.load %s' % filepath)
 
 print 'load extensions ok'
-windowsdir=win32api.GetWindowsDirectory()
 nt = pykd.module( "nt" )
 g_kernelsize=int(nt.size())
 g_kernelbase=int(nt.begin())
@@ -41,11 +64,11 @@ module_entry=pykd.ptrMWord(pykd.getOffset('nt!PsLoadedModuleList'))
 module_entry=pykd.typedVar('nt!_LDR_DATA_TABLE_ENTRY', module_entry)
 kernelpath=pykd.loadUnicodeString(module_entry.FullDllName)
 name=os.path.basename(kernelpath)
-g_kernelpath=os.path.join(windowsdir,'system32', name)
+g_kernelpath=os.path.join(g_system32dir, name)
 if not os.path.exists(g_kernelpath):
     raise Exception("can't find %s" % g_kernelpath)
 imagename=nt.image()
-kernelbasepath=os.path.join(windowsdir, 'system32', imagename)
+kernelbasepath=os.path.join(g_system32dir, imagename)
 import shutil
 if not os.path.exists(kernelbasepath):
     shutil.copy(g_kernelpath, kernelbasepath)
@@ -53,7 +76,6 @@ if not os.path.exists(kernelbasepath):
 g_currentprocess=pykd.typedVar('nt!_EPROCESS', pykd.getCurrentProcess())
 print 'current process:%x' % g_currentprocess.getAddress()
 
-g_sympath="srv*%s*http://msdl.microsoft.com/download/symbols" % os.path.join(windowsdir, 'symbolds')
 print 'kernel:%s base:%x size:%x(%d)' % (g_kernelpath, g_kernelbase, g_kernelsize, g_kernelsize)
 
 print pykd.getProcessorMode()
@@ -65,6 +87,9 @@ if pykd.is64bitSystem():
     g_mwordsize=8
 else:
     g_mwordsize=4
+print
+print
+print '='*20
 
 def is_xp():
     return  g_version=='XP'
@@ -164,7 +189,7 @@ def guess_filepath(filepath, name=''):
                             break
         elif name:
             windowsdir=win32api.GetWindowsDirectory()
-            newfilepath=os.path.join(windowsdir, 'system32',  name)
+            newfilepath=os.path.join(g_system32dir,  name)
             if os.path.exists(newfilepath):
                 filepath=newfilepath
 
@@ -174,4 +199,4 @@ def guess_filepath(filepath, name=''):
     return (filepath.lower(), name.lower())
 
 if __name__=='__main__':
-    revise_filepath()
+    pass

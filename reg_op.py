@@ -21,6 +21,5 @@ def listReg(regpath='System\CurrentControlSet\Services\Tcpip!*'):
         print err
         
 if __name__=='__main__':
-    listReg()
-    pass
+    print 'no support'
 

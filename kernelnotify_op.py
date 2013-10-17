@@ -261,7 +261,7 @@ def listKernelNotifyRoutine():
     listPlugPlay()
     listIopTimer()
     listShutdown()
-    
+
 if __name__=='__main__':
     listKernelNotifyRoutine()
     pass

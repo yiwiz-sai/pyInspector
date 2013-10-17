@@ -45,6 +45,8 @@ class ModuleInfo(object):
 def listModuleByVadRoot(eprocessaddr):
     modulelist=[]
     try:
+        cmdline='.process /P %x;.reload;' % eprocessaddr
+        r=pykd.dbgCommand(cmdline)
         eprocess=pykd.typedVar('nt!_EPROCESS', eprocessaddr) 
         VadRoot=int(eprocess.VadRoot)
         if not VadRoot:
@@ -91,11 +93,11 @@ def listModuleByVadRoot(eprocessaddr):
         print traceback.format_exc()
     
     return modulelist
-        
+
 def listModuleByLdrList(eprocessaddr):
     modulelist={}
     try:
-        cmdline='.process /P %x' % eprocessaddr
+        cmdline='.process /P %x;.reload;' % eprocessaddr
         r=pykd.dbgCommand(cmdline)
         eprocessobj=pykd.typedVar('nt!_EPROCESS', eprocessaddr)
         if int(eprocessobj.Peb)!=0:
@@ -123,12 +125,13 @@ def listModuleByLdrList(eprocessaddr):
 def listModuleByLdrHash(eprocessaddr):
     modulelist={}
     try:
-        cmdline='.process /P %x' % eprocessaddr
+        cmdline='.process /P %x;.reload;' % eprocessaddr
         r=pykd.dbgCommand(cmdline)
-        cmdline='.reload;'
-        r=pykd.dbgCommand(cmdline)
-        
-        LdrpHashTable=pykd.getOffset('ntdll!LdrpHashTable')
+        try:
+            LdrpHashTable=pykd.getOffset('ntdll!LdrpHashTable')
+        except:
+            print 'get LdrpHashTable symbol fail, maybe ldr is null'
+            return []
         if int(LdrpHashTable)!=0:
             for i in xrange(26):
                 listhead=LdrpHashTable+i*2*g_mwordsize
@@ -146,71 +149,111 @@ def listModuleByLdrHash(eprocessaddr):
     except Exception, err:
         print traceback.format_exc()
     return modulelist.values()
-    
-def inspectHiddenModule(eprocessinfo):
-    funclist=\
-    [
-        listModuleByLdrList, 
-        listModuleByLdrHash, 
-    ]
-    
-    eprocessaddr=eprocessinfo.eprocessaddr
-    sourcemodulelist=listModuleByVadRoot(eprocessaddr)
-    if not sourcemodulelist:
-        return
 
-    printprocess=0
-    for func in funclist:
-        modulelist=func(eprocessaddr)
-        #print len(modulelist)
-        modulelist2={}
-        for i in modulelist:
-            modulelist2[i.baseaddr]=i
-        
-        l=[]
-        for i in sourcemodulelist:
-            if i.baseaddr not in modulelist2:
-                l.append(i)
-            else:
-                modulelist2.pop(i.baseaddr)
-        
-        if l or modulelist2:
-            if not printprocess:
-                print '='*10, 'process:%x pid:%d %s' % (eprocessaddr, eprocessinfo.pid, eprocessinfo.filepath), '='*10
-                print 'baseaddr size entry name filepath'
-                printprocess=1
-                
-            if l:
-                print '!'*5, "following modules can not be found by %s" % func.func_name
-                for i in l:
-                    print '%x %x %x %s %s' % (i.baseaddr, i.size, i.entrypoint, i.name, i.filepath)    
-                
-            if modulelist2:
-                print '!'*5, "following modules can be only found by %s" % func.func_name
-                for i in modulelist2.values():
-                    print '%x %x %x %s %s' % (i.baseaddr, i.size, i.entrypoint, i.name, i.filepath)
-            print 
-            
 from process_op import *
-def inspectAllProcessHiddenModule():
-    processlist=listProcessByPsActiveProcessHead()
-    for i in processlist:
-        inspectHiddenModule(i)
-    print 
-    print 'inspect completely'
+
+def inspectProcessHiddenModule(eprocessaddr=None):
+    try:
+        if eprocessaddr:
+            eprocessobj=pykd.typedVar('nt!_EPROCESS', eprocessaddr)
+            eprocessinfo=ProcessInfo()
+            if not eprocessinfo.init(eprocessobj):
+                print 'it is not a eprocess'
+                return
+            processlist=[eprocessinfo]
+        else:
+            processlist=listProcessByPsActiveProcessHead()
+            if not processlist:
+                print 'can not get process list'
+                return
+        funclist=\
+        [
+            listModuleByLdrList, 
+            listModuleByLdrHash, 
+        ]
+        for eprocessinfo in processlist:
+            try:
+                eprocessaddr=eprocessinfo.eprocessaddr
+                print '='*10, 'process:%x pid:%d %s' % (eprocessaddr, eprocessinfo.pid, eprocessinfo.filepath), '='*10
+                sourcemodulelist=listModuleByVadRoot(eprocessaddr)
+                if not sourcemodulelist:
+                    print 'fail to get vad!!!!!'
+                    continue
+                    
+                hooknumber=0
+                for func in funclist:
+                    modulelist=func(eprocessaddr)
+                    #print len(modulelist)
+                    modulelist2={}
+                    for i in modulelist:
+                        modulelist2[i.baseaddr]=i
+                    
+                    l=[]
+                    for i in sourcemodulelist:
+                        if i.baseaddr not in modulelist2:
+                            l.append(i)
+                        else:
+                            modulelist2.pop(i.baseaddr)
+        
+                    if l:
+                        print '!'*5, "following modules can not be found by %s" % func.func_name
+                        for i in l:
+                            print 'base:%x size:%x entry:%x %s %s' % (i.baseaddr, i.size, i.entrypoint, i.name, i.filepath)    
+                            hooknumber+=1
+                    if modulelist2:
+                        print '!'*5, "following modules can be only found by %s" % func.func_name
+                        for i in modulelist2.values():
+                            print 'base:%x size:%x entry:%x %s %s' % (i.baseaddr, i.size, i.entrypoint, i.name, i.filepath)
+                            hooknumber+=1
+                
+                if hooknumber==0:
+                    print 'no hidden dll'
+            except Exception, err:
+                print traceback.format_exc() 
+                    
+        print 
+        print 'inspect completely'
+    except Exception, err:
+        print traceback.format_exc() 
+
+
+def help():
+    print '-inspectall'
+    print '-inspectone eprocessaddr'
+    print '-list0 eprocessaddr #listModuleByVadRoot'
+    print '-list1 eprocessaddr #listModuleByLdrList'
+    print '-list2 eprocessaddr #listModuleByLdrHash'
     
 if __name__=='__main__':
-    if sys.argv[1]=='inspectall':
-        inspectAllProcessHiddenModule()
-    elif sys.argv[1]=='inspectone':
-        eprocessaddr=int(sys.argv[2], 16)
-        info=ProcessInfo()
-        if info.init(eprocessaddr):
-            inspectHiddenModule(info)
-    elif sys.argv[1]=='list':
-        eprocessaddr=int(sys.argv[2], 16)
-        #modulelist=listModuleByVadRoot(eprocessaddr)
-        modulelist=listModuleByLdrList(eprocessaddr)
-        for i in modulelist:
-            print '%x %x %x %s %s' % (i.baseaddr, i.size, i.entrypoint, i.name, i.filepath)
+    try:
+        if len(sys.argv)<2:
+            help()
+            sys.exit(0)
             
+        if sys.argv[1]=='-inspectall':
+            inspectProcessHiddenModule()
+        elif sys.argv[1]=='-inspectone':
+            eprocessaddr=int(sys.argv[2], 16)
+            inspectProcessHiddenModule(eprocessaddr)
+            
+        elif sys.argv[1]=='-list0':
+            eprocessaddr=int(sys.argv[2], 16)
+            modulelist=listModuleByVadRoot(eprocessaddr)
+            for i in modulelist:
+                print 'base:%x size:%x entry:%x %s %s' % (i.baseaddr, i.size, i.entrypoint, i.name, i.filepath)
+                
+        elif sys.argv[1]=='-list1':
+            eprocessaddr=int(sys.argv[2], 16)
+            modulelist=listModuleByLdrList(eprocessaddr)
+            for i in modulelist:
+                print 'base:%x size:%x entry:%x %s %s' % (i.baseaddr, i.size, i.entrypoint, i.name, i.filepath)
+                
+        elif sys.argv[1]=='-list2':
+            eprocessaddr=int(sys.argv[2], 16)
+            modulelist=listModuleByLdrHash(eprocessaddr)
+            for i in modulelist:
+                print 'base:%x size:%x entry:%x %s %s' % (i.baseaddr, i.size, i.entrypoint, i.name, i.filepath)
+        else:
+            help()
+    except Exception, err:
+        print traceback.format_exc() 

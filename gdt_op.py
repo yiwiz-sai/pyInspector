@@ -7,6 +7,5 @@ def list_gdt():
     pass
     
 if __name__=='__main__':
-    list_gdt()
-    pass
+    print 'no support'
 
