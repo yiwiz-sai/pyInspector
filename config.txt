@@ -1,0 +1,4 @@
+{
+    "windbgpath":"C:\\Program Files\\Windows Kits\\8.0\\Debuggers\\x86",
+    "sympath":"srv*c:\\symbols*http://msdl.microsoft.com/download/symbols"
+}
